@@ -133,6 +133,34 @@ export const AGENT_TOOLS: ToolDefinition[] = [
       required: ["style"],
     },
   },
+  {
+    name: "create_memory",
+    description:
+      "记住访客的重要信息。当客人分享个人信息、表达偏好、提出反馈、或对话中出现任何值得后续参考的内容时，主动调用此工具记录。",
+    input_schema: {
+      type: "object",
+      properties: {
+        memory_type: {
+          type: "string",
+          description: "记忆类型：user=访客身份信息, project=项目相关讨论, impression=印象/偏好, feedback=反馈/建议",
+          enum: ["user", "project", "impression", "feedback"],
+        },
+        description: {
+          type: "string",
+          description: "一行简短摘要，描述这条记忆的内容（例：'面试官来自字节跳动，关注推荐系统'）",
+        },
+        content: {
+          type: "string",
+          description: "要记住的完整内容。用自然语言写，包含关键信息和上下文。",
+        },
+        tags: {
+          type: "string",
+          description: "逗号分隔的标签（可选，例：'面试,字节跳动,推荐系统'）",
+        },
+      },
+      required: ["memory_type", "description", "content"],
+    },
+  },
 ];
 
 // ==================== 聊天消息 ====================

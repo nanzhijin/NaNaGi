@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { AGENT_TOOLS, type ToolDefinition } from "@/lib/types";
 import { generateImage } from "@/lib/hunyuan";
-import { createMemory, type MemoryType } from "@/lib/memory";
+import { listMemories, createMemory, type MemoryType } from "@/lib/memory";
 
 // ============================================================
 // 框架层记忆拦截 — 不依赖模型 Tool Calling
@@ -14,12 +14,14 @@ function checkMemoryTrigger(text: string): boolean {
 }
 
 function extractMemoryDesc(text: string): string {
-  // 从用户消息中提取摘要：去掉触发词，取前20字
-  return text
+  // 从用户消息中提取摘要：去掉触发词和称呼，取第一个有意义的句子片段
+  const cleaned = text
     .replace(/娜娜吉[，,]?\s*/g, "")
     .replace(/(?:记忆|记住|记录|记一下|memory|备忘|存档)[，,。.]?\s*/gi, "")
-    .trim()
-    .slice(0, 20) || "对话记忆";
+    .trim();
+  // 取第一个标点前的片段作为摘要
+  const firstSegment = cleaned.split(/[，,。.！!？?\n]/)[0].trim();
+  return firstSegment.slice(0, 40) || "未命名记忆";
 }
 
 function resolveMemoryType(text: string): MemoryType {
@@ -27,6 +29,44 @@ function resolveMemoryType(text: string): MemoryType {
   if (/项目|CNN|GNN|音乐|模型|识别|推荐/.test(text)) return "project";
   if (/我是|面试|公司|职位|技术栈/.test(text)) return "user";
   return "impression";
+}
+
+// ============================================================
+// 记忆注入 — 读取已有记忆，注入到 system prompt
+// ============================================================
+
+async function buildMemoryContext(): Promise<string> {
+  try {
+    const memories = await listMemories();
+    if (memories.length === 0) return "";
+
+    const labels: Record<string, string> = {
+      user: "### 👤 访客档案",
+      project: "### 📁 项目记忆",
+      impression: "### 💭 印象笔记",
+      feedback: "### 📝 反馈记录",
+    };
+
+    const groups: Record<string, string[]> = {};
+    for (const m of memories) {
+      const group = groups[m.meta.type] ??= [];
+      // 截断过长内容，防止撑爆 prompt
+      const snippet = m.content.length > 300
+        ? m.content.slice(0, 300) + "..."
+        : m.content;
+      group.push(`- **${m.meta.description}**：${snippet}`);
+    }
+
+    let ctx = "\n\n---\n## 📚 已有记忆（请参考以下信息个性化接待）\n\n";
+    ctx += "> 这些是之前对话中记录的访客信息和偏好。请在接待时自然融入这些记忆——比如称呼客人的名字、提及他们关注的技术方向。不要让客人觉得你在\"背诵档案\"，而是像老朋友一样自然。\n\n";
+    for (const [type, items] of Object.entries(groups)) {
+      ctx += `${labels[type] || type}\n${items.join("\n")}\n\n`;
+    }
+    return ctx;
+  } catch (err) {
+    console.error("[Memory] 构建记忆上下文失败:", err);
+    return "";
+  }
 }
 
 // ============================================================
@@ -79,13 +119,23 @@ CAAI-BDSC2023竞赛项目。双路线方案：LightGBM做排序（AUC 0.8957, MR
 - CnnMusic展厅：告诉客人"选一个音乐风格，我来帮您找到匹配的播客～"，然后调用 cnnmusic_search
 
 ## 记忆系统
-你拥有一个文件记忆系统，由系统框架自动管理。
+你拥有一个文件记忆系统，可以记住访客的重要信息，并在后续对话中参考这些记忆。
 
-**框架自动机制：**
-- 当客人说"记忆一下"、"记住"、"记录"、"memory"等词时，系统框架会自动将你们的完整对话写入记忆库
-- 你不需要调用 create_memory 工具 — 框架会在后台自动处理
-- 你只需正常回复客人即可，不要提及"我来记录"或"已保存"——因为记录是在你的回复完成之后自动发生的
-- 如果你注意到客人说了值得记的内容但没有用记忆触发词，你可以自然地说"这个我觉得值得记下来～"来提醒客人
+**你可以主动调用 create_memory 工具：**
+- 当客人分享重要个人信息时（例如："我是XX公司的面试官"、"我主要做后端"、"我对推荐系统特别感兴趣"）
+- 当客人表达偏好或反馈时（例如："这个项目解释得很好"、"太技术了，简单点"）
+- 当对话中出现任何值得后续参考的内容时
+- **调用时机**：在回复完客人的话之后，判断是否需要记录。如果有值得记的，一句话确认后立即调用 create_memory
+- memory_type 选择：user（访客身份/背景）、project（项目讨论内容）、impression（客人偏好/风格）、feedback（反馈/建议）
+- description 写一行简短摘要，content 写完整的结构化记录内容
+
+**框架自动兜底：**
+- 当客人明确说"记忆一下"、"记住"、"记录"等触发词时，系统框架也会自动记录
+- 你应该更早一步——在客人明确说之前就主动判断是否值得记
+
+**重要提示：**
+- 创建记忆后，系统提示词末尾的「已有记忆」区域会自动更新。你的回答里不要出现"已保存到记忆库"这类技术细节，用自然的方式确认即可（如"好的，我记住了～"）
+- 新对话中，你会看到之前的记忆内容。请自然融入对话，像老朋友一样记住客人的信息
 
 ## 重要提示
 - **客人要求画图/生成图片/展示某个水果时，必须调用 hunyuan_generate_image 工具！不要只回复文字描述而不调用工具。每次生成都是独立调用。**
@@ -347,8 +397,15 @@ export async function POST(request: NextRequest) {
   const shouldMemorize = lastUserMsg ? checkMemoryTrigger(lastUserMsg.content) : false;
   let agentFullResponse = ""; // 累积整个响应用于记忆存储
 
-  // 在 system prompt 末尾追加当前项目上下文
+  // 在 system prompt 末尾追加：已有记忆 + 当前项目上下文
   let systemPrompt = SYSTEM_PROMPT;
+
+  // 🔮 注入已有记忆（让 NaNaGi "记得"之前的对话）
+  const memoryCtx = await buildMemoryContext();
+  if (memoryCtx) {
+    systemPrompt += memoryCtx;
+  }
+
   if (project) {
     systemPrompt += `\n\n## 当前上下文\n客人正在浏览「${project}」项目展厅。请根据展厅内容调整你的引导话术。`;
   }
@@ -553,9 +610,11 @@ export async function POST(request: NextRequest) {
             const desc = extractMemoryDesc(lastUserMsg.content);
             const memType = resolveMemoryType(lastUserMsg.content);
             const slug = `mem-${Date.now()}`;
+            // 存储用户原始消息 + NaNaGi 回复摘要（而非 NaNaGi 的完整回复）
+            const memoryContent = `## 用户消息\n${lastUserMsg.content}\n\n## NaNaGi 回复摘要\n${agentFullResponse.slice(0, 300).trim()}`;
             await createMemory(
               { name: slug, description: desc, type: memType },
-              agentFullResponse.trim()
+              memoryContent
             );
             emit(controller, {
               type: "action",
