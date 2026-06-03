@@ -37,7 +37,7 @@ export default function AgentWidget() {
         className={`fixed bottom-6 right-6 z-50 pixel-btn-accent w-14 h-14 flex items-center justify-center text-xl ${
           hasNewMessage ? "animate-pulse" : ""
         }`}
-        title="打开 NanAgi 对话"
+        title="打开 NaNaGi 对话"
       >
         {open ? "✕" : "◆"}
       </button>
@@ -49,7 +49,7 @@ export default function AgentWidget() {
             {/* Header */}
             <div className="flex items-center justify-between mb-2 pb-2 border-b-2 border-border">
               <span className="text-xs font-bold tracking-wider">
-                ◆ NanAgi
+                ◆ NaNaGi
               </span>
               <button
                 onClick={() => setOpen(false)}
@@ -71,6 +71,7 @@ export default function AgentWidget() {
                   key={i}
                   role={msg.role}
                   content={msg.content}
+                  imageUrl={msg.imageUrl}
                   isStreaming={
                     streaming &&
                     i === messages.length - 1 &&

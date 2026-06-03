@@ -10,8 +10,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NanAgi | 南志锦 AI Portfolio",
-  description: "AI/ML Engineer — 从模型到产品的完整闭环",
+  title: "NaNaGi | 南志锦 AI Portfolio",
+  description: "南志锦的专属AI女仆 · 从模型到产品的完整闭环",
 };
 
 export default function RootLayout({

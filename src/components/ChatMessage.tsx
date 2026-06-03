@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import DraggableImage from "./DraggableImage";
 
 interface ChatMessageProps {
   role: "agent" | "user";
   content: string;
   isStreaming?: boolean;
+  imageUrl?: string; // 🔮 混元生成的图片
 }
 
 // Parse <a href="...">text</a> from Agent messages into segments
@@ -62,6 +64,7 @@ export default function ChatMessage({
   role,
   content,
   isStreaming = false,
+  imageUrl,
 }: ChatMessageProps) {
   const isAgent = role === "agent";
 
@@ -79,7 +82,7 @@ export default function ChatMessage({
         } ${isStreaming ? "cursor-blink" : ""}`}
       >
         <div className="text-xs font-bold mb-1 opacity-50 tracking-wider uppercase">
-          {isAgent ? "◆ NanAgi" : "◆ 面试官"}
+          {isAgent ? "◆ NaNaGi" : "◆ 面试官"}
         </div>
 
         <div className="chat-content text-sm leading-relaxed break-words">
@@ -101,6 +104,13 @@ export default function ChatMessage({
             )
           ) : (
             <span className="whitespace-pre-wrap">{content}</span>
+          )}
+
+          {/* 🔮 混元生图 — 可拖拽图片 */}
+          {imageUrl && (
+            <div className="mt-2">
+              <DraggableImage src={imageUrl} alt="混元生图" />
+            </div>
           )}
         </div>
 

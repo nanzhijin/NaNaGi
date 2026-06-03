@@ -41,18 +41,18 @@ export default function AgentDialog() {
       <div className="w-full max-w-2xl mx-4">
         <div className="rpg-dialog">
           <div className="text-center mb-6">
-            <h1 className="text-2xl font-bold tracking-wider mb-2">NanAgi</h1>
+            <h1 className="text-2xl font-bold tracking-wider mb-2">NaNaGi</h1>
             <p className="text-ink-muted text-sm tracking-wider">
-              ◆ 南志锦 AI 作品集 ◆
+              ◆ 专属女仆 · AI向导 ◆
             </p>
           </div>
 
           <div className="msg-agent mb-5">
             <div className="text-xs font-bold mb-1 opacity-50 tracking-wider">
-              ◆ NanAgi
+              ◆ NaNaGi
             </div>
             <p className="text-sm leading-relaxed">
-              你好，我是南志锦的AI分身。{"\n\n"}请输入面试密码开始对话。
+              欢迎光临～我是NaNaGi，主人的专属女仆 ✨{"\n\n"}请输入面试密码，让我来招待您。
             </p>
           </div>
 
@@ -90,7 +90,7 @@ export default function AgentDialog() {
     >
       {/* Header */}
       <div className="pixel-border-light bg-cream-card px-4 py-2 mb-3 flex items-center justify-between">
-        <span className="text-xs font-bold tracking-wider">◆ NanAgi 在线</span>
+        <span className="text-xs font-bold tracking-wider">◆ NaNaGi 在线</span>
         <span className="text-xs text-ink-muted">
           {streaming ? "回复中..." : "就绪"}
         </span>
@@ -101,14 +101,14 @@ export default function AgentDialog() {
         {messages.length === 0 && (
           <div className="msg-agent">
             <div className="text-xs font-bold mb-1 opacity-50 tracking-wider">
-              ◆ NanAgi
+              ◆ NaNaGi
             </div>
             <p className="text-sm leading-relaxed">
-              欢迎！我是南志锦，一名AI/ML工程师。
+              欢迎光临～我是NaNaGi，主人的专属女仆 ✨
               {"\n\n"}
-              我的技术栈覆盖机器学习全流程：从数据分析、特征工程到模型训练和部署落地。
+              让我来介绍一下主人吧！主人是一名AI/ML工程师，技术栈覆盖机器学习全流程：从数据分析、特征工程到模型训练和部署落地。
               {"\n\n"}
-              我有 3 个核心项目可以聊：
+              主人有 3 个很厉害的项目：
               {"\n"}
               • 🍎 水果识别CNN — ONNX浏览器端实时推理
               {"\n"}
@@ -116,7 +116,7 @@ export default function AgentDialog() {
               {"\n"}
               • 🔗 GNN社交图谱链接预测 — CAAI-BDSC2023
               {"\n\n"}
-              从哪里开始？你可以问我技术问题，也可以让我展示项目。
+              您想了解哪个呢？或者让我直接带您去看看？
             </p>
           </div>
         )}
@@ -126,6 +126,7 @@ export default function AgentDialog() {
             key={i}
             role={msg.role}
             content={msg.content}
+            imageUrl={msg.imageUrl}
             isStreaming={
               streaming && i === messages.length - 1 && msg.role === "agent"
             }
@@ -142,7 +143,7 @@ export default function AgentDialog() {
           placeholder="问任何关于南志锦或项目的问题..."
         />
         <p className="text-ink-muted text-xs mt-2 text-center tracking-wider">
-          Enter 发送 · 南志锦 AI 分身
+          Enter 发送 · NaNaGi
         </p>
       </div>
     </div>

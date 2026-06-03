@@ -1,22 +1,41 @@
 "use client";
 
 import { useEffect } from "react";
+import { useChat } from "@/contexts/ChatContext";
+import type { JukeboxMode } from "@/lib/types";
 
-// Client component: notifies Agent of current project context
-// Future: sends project context to the chat API for contextual responses
-export default function ProjectPageClient({ slug }: { slug: string }) {
+interface ProjectPageClientProps {
+  slug: string;
+  /** 唱片机模式 */
+  mode: JukeboxMode;
+}
+
+/** Client component: registers project context for Agent + enables jukebox mode */
+export default function ProjectPageClient({ slug, mode }: ProjectPageClientProps) {
+  const { setProjectSlug, clearModelResult } = useChat();
+
   useEffect(() => {
-    // Store current project slug for Agent context
-    // Phase 2: inject into chat API calls
+    setProjectSlug(slug);
+    // 进入新展厅时清空上一轮的推理结果
+    clearModelResult();
+    return () => {
+      setProjectSlug(null);
+    };
+  }, [slug, setProjectSlug, clearModelResult]);
+
+  // Register mode for the page (used by chat API)
+  useEffect(() => {
     if (typeof window !== "undefined") {
       (window as unknown as Record<string, unknown>).__nanagiProject = slug;
+      (window as unknown as Record<string, unknown>).__nanagiMode = mode;
     }
     return () => {
       if (typeof window !== "undefined") {
         delete (window as unknown as Record<string, unknown>).__nanagiProject;
+        delete (window as unknown as Record<string, unknown>).__nanagiMode;
       }
     };
-  }, [slug]);
+  }, [slug, mode]);
 
-  return null; // no UI — chat widget is handled by PageShell
+  return null;
 }

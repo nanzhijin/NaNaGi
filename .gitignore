@@ -14,6 +14,9 @@ node_modules/
 out/
 dist/
 
+# 运行时记忆文件
+data/
+
 # misc
 .DS_Store
 *.pem
