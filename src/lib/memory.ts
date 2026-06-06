@@ -6,8 +6,9 @@
 import fs from "fs/promises";
 import path from "path";
 import { existsSync } from "fs";
+import { getMemoryDir } from "@/lib/env";
 
-const MEMORY_DIR = process.env.MEMORY_DIR || path.join(process.cwd(), "data", "memory");
+const MEMORY_DIR = getMemoryDir();
 const INDEX_FILE = "MEMORY.md";
 
 // ==================== 类型 ====================

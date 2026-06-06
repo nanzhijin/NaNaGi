@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
+// Edge Runtime 不兼容 process.cwd() — JWT secret 直接读 env
 const SECRET = new TextEncoder().encode(
   process.env.NANAGI_PASSWORD_HASH || "fallback-secret-change-me"
 );
@@ -19,18 +20,27 @@ export async function middleware(request: NextRequest) {
     try {
       const { payload } = await jwtVerify(token, SECRET);
       const role = (payload.role as string) || "guest";
+      const personId = (payload.personId as string) || "unknown";
 
-      // 删除记忆：仅 admin
-      if (request.method === "DELETE" && pathname.startsWith("/api/memory") && role !== "admin") {
+      // 删除记忆: 仅 admin
+      if (
+        request.method === "DELETE" &&
+        pathname.startsWith("/api/memory") &&
+        role !== "admin"
+      ) {
         return NextResponse.json({ error: "需要管理员权限" }, { status: 403 });
       }
 
-      // 创建记忆：仅 Agent 调用（内部），不需要额外限制
-      // 但所有操作需要有效的 JWT
-
-      return NextResponse.next();
+      // 注入 role + personId → route.ts 直接读
+      const response = NextResponse.next();
+      response.headers.set("x-nanagi-role", role);
+      response.headers.set("x-nanagi-person-id", personId);
+      return response;
     } catch {
-      return NextResponse.json({ error: "登录已过期，请重新输入密码" }, { status: 401 });
+      return NextResponse.json(
+        { error: "登录已过期，请重新输入密码" },
+        { status: 401 }
+      );
     }
   }
 

@@ -3,8 +3,9 @@
 // API 文档：https://tokenhub.tencentmaas.com
 // ============================================================
 
+import { getHunyuanKeys } from "@/lib/env";
+
 const HUNYUAN_BASE = "https://tokenhub.tencentmaas.com/v1/api/image";
-const HUNYUAN_API_KEY = process.env.HUNYUAN_API_KEY || "";
 
 interface SubmitResponse {
   id: string;
@@ -23,7 +24,7 @@ async function submitImage(prompt: string): Promise<string> {
   const res = await fetch(`${HUNYUAN_BASE}/submit`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${HUNYUAN_API_KEY}`,
+      "Authorization": `Bearer ${getHunyuanKeys().apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -49,7 +50,7 @@ async function queryImage(taskId: string): Promise<QueryResponse> {
   const res = await fetch(`${HUNYUAN_BASE}/query`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${HUNYUAN_API_KEY}`,
+      "Authorization": `Bearer ${getHunyuanKeys().apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -76,7 +77,8 @@ export async function generateImage(
   prompt: string,
   maxWaitMs = 60_000
 ): Promise<string> {
-  if (!HUNYUAN_API_KEY) {
+  const { apiKey } = getHunyuanKeys();
+  if (!apiKey) {
     throw new Error("HUNYUAN_API_KEY 未配置");
   }
 
