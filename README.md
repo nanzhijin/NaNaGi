@@ -25,7 +25,7 @@
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                    NaNaGi 社交图 (Social Graph)                            │
-│                    理论基础: Bowlby IWM [1][2][3] + GNN [18]              │
+│                    理论基础: Bowlby IWM [1][2][3] + GNN [19]              │
 │                                                                          │
 │                        南志锦 (admin)                                     │
 │                        ╔═══════════╗                                     │
@@ -71,7 +71,7 @@
 | playfulness | 0.65 | 爱玩/爱闹的程度 |
 | diligence | 0.85 | 认真程度 |
 
-**IWM Nodes** — 她心中的其他人。理论基础：Bowlby 内部工作模型 (Internal Working Model) [1][2][3] + Object Relations 内在客体 [16][17]。每人一个独立节点，持久化在 `data/graph/{personId}.json`。随对话更新，弹簧拉回。
+**IWM Nodes** — 她心中的其他人。理论基础：Bowlby 内部工作模型 (Internal Working Model) [1][2][3] + Object Relations 内在客体 [16][17][18]。每人一个独立节点，持久化在 `data/graph/{personId}.json`。随对话更新，弹簧拉回。
 
 | trait | 含义 | 弹簧 K |
 |-------|------|--------|
@@ -93,10 +93,10 @@
 │  Self-Node ←── edges ──→ IWM Nodes                              │
 │  · 直接对话 → 更新 IWM Node                                      │
 │  · 主人提到克劳德 → Heider 平衡 [4] → 克劳德节点更新              │
-│  · 新guest → 从通道基线初始化 → 冷启动 [18]                       │
+│  · 新guest → 从通道基线初始化 → 冷启动 [19]                       │
 │                                                                  │
-│  引用: [1][2][3] Bowlby IWM / [16][17] Object Relations          │
-│        [4] Heider 平衡 / [18] GraphSAGE                          │
+│  引用: [1][2][3] Bowlby IWM / [16][17][18] Object Relations        │
+│        [4] Heider 平衡 / [19] GraphSAGE                          │
 ├─────────────────────────────────────────────────────────────────┤
 │  LAYER 2: 情绪空间 (分钟~小时)                                     │
 │                                                                  │
@@ -207,7 +207,7 @@ POST /api/chat
       ▼
 ┌─ STEP 0: 加载 IWM Node [1][2][3] ────────────────┐
 │  data/graph/{personId}.json → IWMNode             │
-│  新节点 → 从通道基线初始化 [18]                      │
+│  新节点 → 从通道基线初始化 [19]                      │
 │  根据 elapsed time 计算弹簧拉回 [10]                 │
 └────────────────────┬──────────────────────────────┘
                      ▼
@@ -289,7 +289,7 @@ POST /api/chat
 
 ## GNN 概念映射
 
-NaNaGi 的社交图与南志锦的 GNN 项目形成学术对称 [18]：
+NaNaGi 的社交图与南志锦的 GNN 项目形成学术对称 [19]：
 
 | GNN 概念 | NaNaGi 对应 | 心理学对应 |
 |---------|------------|-----------|
@@ -298,7 +298,7 @@ NaNaGi 的社交图与南志锦的 GNN 项目形成学术对称 [18]：
 | Message Passing | 主人提到克劳德 → 沿边传播 | Heider 平衡 [4] |
 | Link Prediction | 新 guest 值得信任多少？ | 社会认知 [13] |
 | Cold Start | 新节点从通道基线初始化 | 第一印象形成 [1] |
-| GraphSAGE Aggregation [18] | 聚合所有已知节点 → 全局状态 | Object Relations [16] |
+| GraphSAGE Aggregation [19] | 聚合所有已知节点 → 全局状态 | Object Relations [16][17] |
 
 ---
 
@@ -312,7 +312,7 @@ NaNaGi 的社交图与南志锦的 GNN 项目形成学术对称 [18]：
 
 4. **Heider, F.** (1958). *The Psychology of Interpersonal Relations*. New York: Wiley. — 平衡理论：P–O–X 三角关系中的态度传播。NaNaGi 社交图的 Message Passing 机制来源。
 
-5. **Jung, C. G.** (1953). The persona as a segment of the collective psyche. In *Two Essays on Analytical Psychology* (pp. 156–171). Princeton University Press. — 人格面具：同一自我在不同社交情境中呈现不同面向。双通道系统（guest/admin）的理论基础。
+5. **Jung, C. G.** (1953). The persona as a segment of the collective psyche. In *Collected Works, Vol. 7: Two Essays on Analytical Psychology* (R. F. C. Hull, Trans., pp. 156–171). Princeton University Press. (Original work published 1943) — 人格面具：同一自我在不同社交情境中呈现不同面向，persona 不等于深层 self。双通道系统（guest/admin）的理论基础。
 
 6. **Mehrabian, A., & Russell, J. A.** (1974). *An Approach to Environmental Psychology*. Cambridge, MA: MIT Press. — PAD 情绪三维模型（Pleasure–Arousal–Dominance）。六维情绪空间的前三维 + 物理环境对情绪的影响（AmbientContext 的环境输入假说）。
 
@@ -334,11 +334,13 @@ NaNaGi 的社交图与南志锦的 GNN 项目形成学术对称 [18]：
 
 15. **Young, J. E., Klosko, J. S., & Weishaar, M. E.** (2003). *Schema Therapy: A Practitioner's Guide*. New York: Guilford Press. — 图式疗法：早期形成的核心人格结构（Early Maladaptive Schemas）稳定且难以改变。Self-Node 作为"性格硬件"（K=0.05 极慢演化）的理论来源。
 
-16. **Klein, M.** (1952). Some theoretical conclusions regarding the emotional life of the infant. In *Envy and Gratitude and Other Works* (pp. 61–93). London: Hogarth Press. — Object Relations：内在客体——心中对重要他人的表征不等同于真实他人本身。IWM Node 作为"娜娜吉心中的你"（而非真实的你）的理论基础。
+16. **Klein, M.** (1946). Notes on some schizoid mechanisms. *International Journal of Psycho-Analysis*, 27, 99–110. — 内在客体与投射性认同的原初论证。心中对重要他人的表征（inner object）≠ 真实他人本身——IWM Node 作为 representation-not-reality 的核心理论锚点。
 
-17. **Winnicott, D. W.** (1965). *The Maturational Processes and the Facilitating Environment*. London: Hogarth Press. — 过渡性客体与促进性环境。IWM Node 的 care 维度：她对这个人的在意程度来自互动质量，而非预设。
+17. **Klein, M.** (1957). *Envy and Gratitude*. London: Tavistock. — 内在客体世界的情感动力：嫉羡与感恩如何塑造对他人表征的态度。IWM Node 的 care 与 respect 维度——她对某个人的在意或疏远，源自互动中积累的情感体验，而非预设。
 
-18. **Hamilton, W. L., Ying, R., & Leskovec, J.** (2017). Inductive representation learning on large graphs. *Advances in Neural Information Processing Systems*, 30. — GraphSAGE：归纳式图节点嵌入学习。社交图的 Message Passing 与节点更新机制的数学对应。
+18. **Winnicott, D. W.** (1965). *The Maturational Processes and the Facilitating Environment*. London: Hogarth Press. — 过渡性客体与促进性环境：健康的心理发展需要足够好的照料。IWM Node 的 safety 与 intimacy 维度——安全感与亲近感来自互动质量，而非一次性设定。
+
+19. **Hamilton, W. L., Ying, R., & Leskovec, J.** (2017). Inductive representation learning on large graphs. *Advances in Neural Information Processing Systems*, 30. — GraphSAGE：归纳式图节点嵌入学习。社交图的 Message Passing 与节点更新机制的数学对应。
 
 ---
 
@@ -365,7 +367,7 @@ NaNaGi 的社交图与南志锦的 GNN 项目形成学术对称 [18]：
 | 阶段 | 内容 |
 |------|------|
 | **V2.6** | ReAct 循环 + 9 工具 + 三层容灾 + System Prompt 六段式拼接 |
-| **V2.7** | 社交图引擎 (graph.ts) [1][4][18] + OCC 情绪引擎 [8] + 双弹簧 [10] + AmbientContext [6] |
+| **V2.7** | 社交图引擎 (graph.ts) [1][4][19] + OCC 情绪引擎 [8] + 双弹簧 [10] + AmbientContext [6] |
 | **V2.8** | SIP 社交规划 [11] + 人格过滤层 [5] + 内心独白 [9] + 隐形记忆 |
 | **V3** | RAG 向量检索 (LanceDB) + Multi-Agent 编排 |
 | **后续** | CNN ONNX 推理 / GNN FastAPI / CnnMusic FAISS / 腾讯云部署 |
@@ -380,7 +382,7 @@ src/
 │   ├── types.ts                  ← SelfNode [15], IWMNode [1][3], GraphState,
 │   │                                EmotionState [6][7], AmbientContext, ...
 │   ├── configs/{self,guest,admin}.ts
-│   ├── graph.ts                  ← 社交图: 节点CRUD + 边 + Message Passing [4][18]
+│   ├── graph.ts                  ← 社交图: 节点CRUD + 边 + Message Passing [4][19]
 │   ├── emotion.ts                ← OCC评价 [8] + 双弹簧拉回 [10]
 │   ├── ambient-context.ts        ← 时间·地点·天气 → ambientMood [6][7]
 │   ├── signals.ts                ← 外部信号提取 (情感词典/句法/提及)
@@ -457,7 +459,7 @@ npm run dev                  # http://localhost:3000
 >
 > 情绪不是 prompt 里的形容词，是独立的 OCC 评价引擎 [8]——外部信号驱动、规则引擎计算、不经 LLM 手、每一笔变化都有 audit log。高通路 [9] 在关键时刻触发内心独白，但不替她决定情绪。当主人提到第三者时，图上的 Message Passing 机制（Heider 平衡理论 [4]）会自动更新第三者的节点。
 >
-> 这跟我做的 GNN 社交图谱链接预测是同一套数学框架 [18]——Node Embedding、Edge Weight、Message Passing、Cold Start。”
+> 这跟我做的 GNN 社交图谱链接预测是同一套数学框架 [19]——Node Embedding、Edge Weight、Message Passing、Cold Start。”
 
 ---
 
