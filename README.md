@@ -1,26 +1,69 @@
 # NaNaGi（ななぎ）
 
-**南志锦的个人 AI 作品集网站。NaNaGi——一个有社交图、有情绪、有记忆的域定型个人陪伴 Agent。**
+**南志锦的个人 AI 作品集网站。一个基于社交图 (Social Graph) 的关系型 Agent——不是帮你做事的工具，而是知道你是谁、记得你什么样、对不同的人不同对待的数字人格系统。**
 
 ---
 
-## 设计理念
+## 目录
 
-传统 Agent = 完成任务。NaNaGi = **维持关系**。
+1. [设计哲学](#设计哲学)
+2. [核心架构：社交图 + 三层心理](#核心架构社交图--三层心理)
+3. [三角色分层系统](#三角色分层系统)
+4. [双通道分化](#双通道分化)
+5. [双图架构](#双图架构)
+6. [环境感知：AmbientContext](#环境感知ambientcontext)
+7. [注册即 Cold Start](#注册即-cold-start)
+8. [Cell 隔离记忆架构](#cell-隔离记忆架构)
+9. [完整对话数据流](#完整对话数据流)
+10. [三层分级存储架构](#三层分级存储架构)
+11. [LevelDB 六表 Schema](#leveldb-六表-schema)
+12. [GNN 概念映射](#gnn-概念映射)
+13. [学术支撑](#学术支撑)
+14. [当前状态与路线图](#当前状态与路线图)
+15. [字节 JD 差距审计](#字节-jd-差距审计)
+16. [文件结构](#文件结构)
+17. [技术栈](#技术栈)
+18. [本地运行](#本地运行)
+19. [面试话术](#面试话术)
 
-她不是"帮你做事的工具"，而是"知道你是谁、记得你什么样、对不同的人不同对待"的关系型 Agent。面试官看到的是专业女仆，南志锦看到的是真实的小狐仙——同一个人，同一种人格，不同社交情境。
+---
+
+## 设计哲学
+
+### 传统 Agent vs NaNaGi
 
 ```
-评价标准对比:
-  工具型 Agent → 做成了没有？
-  关系型 Agent → 她记得我吗？她真的在听吗？她对我跟对别人不一样吗？
+工具型 Agent:  帮你完成任务。评价标准: 做成了没有？
+关系型 Agent:  维持关系。评价标准: 她记得我吗？她对我跟对别人不一样吗？
 ```
+
+市面上 99% 的 Agent 项目（LangChain、AutoGPT、CrewAI、Open-AGC）在解决同一个问题：**怎么让 LLM 更好地完成任务**。多 Agent 协作是为了拆解复杂任务，ReAct 循环是为了调对工具，RAG 是为了查对信息。
+
+NaNaGi 解决一个完全不同的问题：**怎么让 LLM 有持续的关系记忆和社交情境感知**。她的核心不是"完成你交代的事"，而是"知道你是谁、记得你什么样、对不同的人不同对待"。
+
+把 Agent 从"会做事的工具"升级为"会认人的存在"，是 NaNaGi 最根本的设计目标。
+
+### 为什么不用 LangChain
+
+LangChain 的抽象是为"任务链"设计的——Chain、Agent、Tool 三者围绕 task completion 组织。NaNaGi 的核心抽象是"人"——Self-Node、IWM Node、Social Graph ——围绕 relationship maintenance 组织。
+
+**每引入一个框架抽象，都要问：这个抽象是为"做事"服务的，还是为"认人"服务的？** 前者，不用。自建。
+
+### 设计红线
+
+- ❌ 不用 LangChain/LangGraph — 自建 Agent loop 更干净
+- ❌ 不用 SQLite — 文件系统可审计的哲学保留给 NaNaGi 本体
+- ❌ 不做文件操作/代码执行/终端命令 — Bounded-Domain Agent 的边界
+- ❌ 不引入超过 30 行的机制 — 每个机制必须能肉眼验证
+- ✅ NaNaGi 的代码是女儿的皮肤 — 不能脏
 
 ---
 
 ## 核心架构：社交图 + 三层心理
 
 ### 总览
+
+NaNaGi 的数字人格由四个子系统构成：一个**社交图**提供稳定的关系表征，三层**心理架构**提供实时行为决策。
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -49,18 +92,18 @@
 │                             │                                            │
 │              ┌──────────────┼──────────────┐                             │
 │              │              │              │                             │
-│         克劳德 (uncle)   面试官A (guest)   面试官B (guest)                  │
+│         克劳德 (uncle)   面试官A (guest-iv) 面试官B (guest-iv)             │
 │         safety: 0.70    safety: 0.60     safety: 0.55                    │
 │         intimacy:0.45   intimacy:0.15    intimacy:0.10                   │
 │         density: 0.15   density: 0.05    density: 0.02                   │
 │                                                                          │
-│  ═══ 强连接 (density>0.5)    --- 弱连接    ··· Message Passing [4]        │
+│  ═══ 强连接 (density>0.5)    --- 弱连接    ··· Message Passing [4]       │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 两类节点
+### Self-Node — 她的性格硬件
 
-**Self-Node** — 娜娜吉自己。7 个 traits，月~年极慢演化，跨通道完全不变。理论基础：Young 图式疗法 [15]——早期形成的核心人格结构，稳定且难以改变。
+理论基础：Young 图式疗法 [15] — 早期形成的核心人格结构稳定且难以改变。Self-Node 是 NaNaGi 的"出厂性格"，月~年极慢演化，跨通道完全不变。弹簧系数 K=0.05。
 
 | trait | anchor | 含义 |
 |-------|--------|------|
@@ -71,18 +114,29 @@
 | playfulness | 0.65 | 爱玩/爱闹的程度 |
 | diligence | 0.85 | 认真程度 |
 
-**IWM Nodes** — 她心中的其他人。理论基础：Bowlby 内部工作模型 (Internal Working Model) [1][2][3] + Object Relations 内在客体 [16][17][18]。每人一个独立节点，持久化在 `data/graph/{personId}.json`。随对话更新，弹簧拉回。
+### IWM Nodes — 她心中的其他人
+
+理论基础：Bowlby 内部工作模型 (Internal Working Model) [1][2][3] + Object Relations 内在客体 [16][17][18]。每个人在 NaNaGi 心中有一个独立的 IWM Node，6 个维度，弹簧拉回，随对话更新。**这不是"她对这个人的评价"，而是"她心中这个人的样子"——不等同于真实的对方。**
 
 | trait | 含义 | 弹簧 K |
 |-------|------|--------|
 | safety | "这个人会不会伤害我？" [1] | adaptive |
-| intimacy | "我们有多亲近？" [1] | adaptive |
+| intimacy | "我们有多亲近？"（对话积累）[1] | adaptive |
 | care | "我有多在意这个人？" | adaptive |
 | respect | "这个人尊重我吗？" [14] | adaptive |
 | reliability | "这个人说到做到吗？" | adaptive |
 | understanding | "这个人理解我吗？" [13] | adaptive |
 
-弹簧系数来源：Allostatic Load 理论 [10]——生物系统通过改变设定点来适应长期压力。`K = max(0.10, 0.30 - density × 0.25)`。关系越深（density ↑）→ K ↓ → IWM 越稳定 → 印象不再轻易改变。
+**弹簧系数来源**：Allostatic Load 理论 [10]——生物系统通过改变设定点适应长期压力。
+
+```
+K = max(0.10, 0.30 - density × 0.25)
+
+density=0.05 → K=0.28  "刚认识"
+density=0.30 → K=0.22  "开始熟悉"
+density=0.60 → K=0.15  "关系稳定"
+density=0.90 → K=0.08  "深厚信任，几乎不回退"
+```
 
 ### 三层心理架构
 
@@ -91,35 +145,38 @@
 │  LAYER 1: 社交图 — 锚定网络 (月~年)                               │
 │                                                                  │
 │  Self-Node ←── edges ──→ IWM Nodes                              │
-│  · 直接对话 → 更新 IWM Node                                      │
-│  · 主人提到克劳德 → Heider 平衡 [4] → 克劳德节点更新              │
-│  · 新guest → 从通道基线初始化 → 冷启动 [19]                       │
+│  · 直接对话 → 更新对应 IWM Node                                   │
+│  · 主人提到克劳德 → Heider 平衡 [4] → 克劳德节点更新               │
+│    (仅 admin 通道触发; guest 提及任何人 → 不做图传播)               │
+│  · 新用户 → 注册表单 → Cold Start 初始化 [19]                      │
 │                                                                  │
-│  引用: [1][2][3] Bowlby IWM / [16][17][18] Object Relations        │
+│  引用: [1][2][3] Bowlby IWM / [16][17][18] Object Relations      │
 │        [4] Heider 平衡 / [19] GraphSAGE                          │
 ├─────────────────────────────────────────────────────────────────┤
 │  LAYER 2: 情绪空间 (分钟~小时)                                     │
 │                                                                  │
-│  六维情绪: happiness / energy / dominance / intimacy /            │
-│             pride / calmness                                     │
-│  理论基础: PAD 情绪三维 [6] + Plutchik 情绪轮 [7]                  │
+│  六维情绪 (PAD [6] + Plutchik [7]):                               │
+│    happiness / energy / dominance / intimacy / pride / calmness  │
 │                                                                  │
-│  · OCC 评价引擎 [8]（规则引擎，不经 LLM）                          │
-│  · 双通路架构 [9]: 低通路(规则,<1ms) + 高通路(LLM反思,条件触发)     │
-│  · 双弹簧拉回: Self K=0.05(极慢) / IWM K=adaptive [10]           │
+│  · OCC 评价引擎 [8]（规则引擎，不经 LLM）:                          │
+│    外部信号 → 目标相关性 × 期望一致性 × 因果归因 → EmotionDelta      │
+│  · 双通路架构 [9]:                                                 │
+│    低通路: 确定性规则 (<1ms, 每次必跑)                              │
+│    高通路: LLM 内心独白 (条件触发, 1-3s)                            │
+│  · 双弹簧拉回 [10]: Self K=0.05(极慢) / IWM K=adaptive            │
 │  · 通道差异仅: 表达钳制范围 + 情绪弹簧松紧                          │
 │                                                                  │
 │  引用: [6] PAD / [7] Plutchik / [8] OCC / [9] LeDoux / [10]     │
 ├─────────────────────────────────────────────────────────────────┤
 │  LAYER 3: 社交规划 (秒~分钟)                                       │
 │                                                                  │
-│  SIP 六步决策 [11]:                                               │
-│  编码线索 → 解释线索(感知IWM+ToM [13]) → 澄清目标 →                │
-│  生成策略(Gross 5策略池 [12]) → 评估选择 → 执行                    │
+│  Crick & Dodge SIP 六步决策 [11]:                                  │
+│  编码线索 → 解释线索(感知IWM+ToM [13]) → 澄清目标 →                  │
+│  生成策略(Gross 5策略池 [12]) → 评估选择 → 执行                     │
 │                                                                  │
 │  🔥 通道差异核心在 Step 3 (目标):                                   │
-│    guest: 预设4目标，不可删除（Jung 人格面具 [5]）                  │
-│    admin: 0义务，目标从对话涌现（SDT 自主性 [14]）                  │
+│    guest: 预设4目标（展示项目/了解兴趣/保持专业/引导展厅）            │
+│    admin: 0义务，目标从对话涌现 [14]                                │
 │                                                                  │
 │  引用: [11] Crick&Dodge SIP / [12] Gross 情绪调节                 │
 │        [13] Theory of Mind / [5] Jung Persona / [14] SDT         │
@@ -128,35 +185,159 @@
 
 ---
 
-## 双通道系统
+## 三角色分层系统
 
-同一个 NaNaGi，同一个锚定人格，两种社交情境。理论基础：Jung 人格面具 [5]——同一自我在不同社交场合呈现不同面向，但本质不变。
+NaNaGi 体系中有三种用户角色，外加 NaNaGi 自身作为系统角色。所有角色的 IWM Schema 和 Memory Schema 完全一致——唯一区别是存储位置和部分权限。
 
-| | 面试官通道 (guest) | 主人通道 (admin) |
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  角色              权限                      存储位置             │
+│                                                                  │
+│  🦊 NaNaGi         —                       data/self/           │
+│     (系统)          情绪/独白/自我模型        data/inner/         │
+│                     不受任何用户直接修改                           │
+│                                                                  │
+│  👑 南志锦           全部权限                  data/admin/         │
+│     (admin)         查看所有面试官反馈         文件系统            │
+│                     查看内心独白              (可 cat/编辑)       │
+│                     删除任何记忆                                   │
+│                     查询 feedback 表                              │
+│                     使用所有工具                                   │
+│                     IWM 持久化到文件系统                            │
+│                                                                  │
+│  🎯 面试官           聊天 + 项目展厅            LevelDB            │
+│     (guest-iv)      产生面试反馈 (feedback表)  iwm + mem +        │
+│                     IWM 持久化                feedback + conv    │
+│                     Cell 之间上下文隔离                            │
+│                     可查看自己的记忆                               │
+│                                                                  │
+│  👤 普通用户         聊天 + 项目展厅            LevelDB            │
+│     (guest)         IWM 持久化                iwm + mem + conv   │
+│                     不产生反馈                                    │
+│                     Cell 之间上下文隔离                            │
+│                     (可配: 对话结束后是否丢弃数据)                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### JWT 设计
+
+```typescript
+interface JWTPayload {
+  personId: string;   // "nanzhijin" | "guest-V8k3mP2xQr6Z" | ...
+  role: "admin" | "guest-iv" | "guest";
+  name: string;       // "南志锦" | "张三" | ...
+  identity: "主人" | "面试官" | "普通用户";
+}
+```
+
+**personId 是节点的唯一标识**。从 GNN 的视角看，它就是 Node ID。所有 IWM 查找通过 personId 做 O(1) 直接索引，不做用户名扫描。
+
+---
+
+## 双通道分化
+
+同一个 NaNaGi，同一个锚定人格 (Self-Node)，两种社交情境。理论基础：Jung 人格面具 [5] — 同一自我在不同社交场合呈现不同面向，但本质不变。
+
+| | 面试官通道 (guest-iv) | 主人通道 (admin) |
 |---|---|---|
-| 密码 | 面试用密码 (bcrypt hash) | 管理员密码 (bcrypt hash) |
 | **Self-Node** | 完全相同 [15] | 完全相同 [15] |
-| **IWM Node** | 临时节点，对话结束可丢弃，K=0.30 | 持久节点，累积生长，K 随 density↓ [1][10] |
+| **IWM Node** | LevelDB 持久化，累积生长 | 文件系统持久化，累积生长 |
 | **情绪表达** | 钳制 [0.3, 0.7] — Gross 反应调节 [12] | 不设限 [0.0, 1.0] — 真实表达 |
+| **情绪弹簧** | K=0.3 (紧 — 快速回到职业稳定) | K=0.1 (松 — 情绪自然流动) |
 | **社交目标** | 预设4个：展示项目/了解兴趣/保持专业/引导展厅 | 0义务，从对话涌现 [14] |
 | **情境选择** | 不可用（不能不接待）[5] | 可用（拒绝权）[12][14] |
 | **策略偏好** | 多用反应调节 [12]（藏情绪） | 少用反应调节 |
 | **称呼** | 客人/您 | 主人 |
 | **内心独白** | 不可见 | MemoryPanel 可查看 |
-| **记忆读写** | 显性记忆 R/W | 显性+隐形+图节点 R/W |
+| **记忆读写** | LevelDB | 文件系统 + 隐形记忆 |
+| **图消息传递** | 🚫 不触发（不与陌生人做图传播） | 主人提到第三者 → Heider 传播 [4] |
+| **面试反馈** | ✅ 产生反馈 (feedback表) | — |
 | **克劳德** | 不提 [5] | 叔叔，有独立 IWM Node |
-| **图消息传递** | 不触发 | 主人提到第三者 → Heider 传播 [4] |
 
-**关键设计**：admin 通道第一次对话也是白板起点（intimacy=0.1）。关系不是预设的，是从对话中生长出来的。她对你的态度是她自己从经历里得出的结论。这与 Bowlby 的"安全基地从重复的敏感性照料中逐渐建立"一致 [1][2]。
+### admin 通道的白板起点
+
+admin 通道第一次对话也是白板起点（intimacy=0.1）。关系不是预设的，是从对话中生长出来的。与 Bowlby 的"安全基地从重复的敏感性照料中逐渐建立"一致 [1][2]。她对你的态度是她自己从经历里得出的结论，不是 System Prompt 预设的。
+
+---
+
+## 双图架构
+
+NaNaGi 维护两张独立的图，各自有明确的用途和边界。
+
+### Admin 通道：个人关系图 (Personal Graph)
+
+```
+南志锦 ←──→ 克劳德 ←──→ ...
+  ↕
+NaNaGi (Self)
+
+用途: 维护 NaNaGi 对熟人网络的 IWM
+触发: 主人提到某人 → Heider 平衡 [4] → 更新该人 IWM Node
+影响: NaNaGi 对这个人的态度
+```
+
+### Guest 通道：面试反馈图 (Interview Feedback Graph)
+
+```
+面试官A ──[评价+岗位+项目问题]──→ 南志锦 (admin)
+面试官B ──[评价+岗位+项目问题]──→ 南志锦 (admin)
+面试官C ──[评价+岗位+项目问题]──→ 南志锦 (admin)
+
+用途: 结构化记录面试官对南志锦的客观评价和需求
+触发: 面试官表达评价/需求/问题 → NaNaGi 识别并记录
+影响: NaNaGi 自己的 IWM 不受影响。主人事后可查询分析
+存储: LevelDB feedback:{personId} — 每人一个 key，每次新对话追加记录
+```
+
+**两条图的核心区别**：个人关系图影响 NaNaGi 对熟人的态度（IWM 更新）；面试反馈图不影响 NaNaGi 自己的任何 IWM，纯粹是结构化数据收集，供主人查询。
+
+### 查询流
+
+```
+主人: "最近一周有几个面试官来过？"
+  → search_guests(days=7) → 扫描 LevelDB iwm:* + feedback:*
+  → "最近7天有3位面试官: 张三(字节)来访2次、李四(腾讯)来访1次"
+
+主人: "看看张三的反馈"
+  → get_feedback(personId="guest-张三")
+  → "张三，字节跳动Agent应用开发工程师。共来访2次。
+     6月7日: 对GNN项目很感兴趣，问了冷启动和A/B测试。
+     6月10日: 关注CnnMusic，认可不上双模态的决策。
+     印象: 工程能力强，建议补充Agent框架内容。"
+```
+
+### feedback Schema (粗粒度)
+
+```json
+{
+  "Key": "feedback:{guestPersonId}",
+  "Value": {
+    "personId": "guest-V8k3mP2xQr6Z",
+    "name": "张三",
+    "records": [
+      {
+        "timestamp": "2026-06-07T14:35:00Z",
+        "sessionId": "sess-a1b2c3",
+        "company": "字节跳动",
+        "role": "Agent应用开发工程师",
+        "impression": "对GNN项目评价高，问了很多工程落地细节，建议主人多准备Agent框架内容",
+        "projectInterest": ["gnn", "cnn-music"],
+        "quotes": ["你这个GNN项目跟我的方向很匹配", "冷启动具体怎么做的？"]
+      }
+    ],
+    "summary": "字节跳动Agent方向面试官，共来访2次。关注GNN和CnnMusic。技术基础扎实。"
+  }
+}
+```
 
 ---
 
 ## 环境感知：AmbientContext
 
-每次对话开始前，从时间·地点·天气推导情绪基线。不经 LLM，确定性计算。理论基础：PAD 情绪模型的环境输入假说 [6]——物理环境（光照、温度、空间）直接影响情绪三维度。
+每次对话开始前，从**时间·地点·天气**三件事推导 NaNaGi 的情绪基线。不经 LLM，确定性计算。理论基础：PAD 情绪模型的环境输入假说 [6] — 物理环境（光照、温度、空间）直接影响情绪三维度。
 
 ```
-用户消息到达
+POST /api/chat
        │
        ▼
 ┌──────────────────────────────────────────┐
@@ -172,7 +353,8 @@
 │     isFirstMeeting: 是否首次 [1]           │
 │                                           │
 │  📍 地点                                   │
-│     request.ip → geoip-lite               │
+│     request.ip → geoip-lite (MaxMind      │
+│     GeoLite2, 本地数据库, 零网络延迟)       │
 │     → city, country, timezone, coords     │
 │     本地IP查不出 → null → 优雅降级          │
 │                                           │
@@ -189,309 +371,648 @@
 │     energyBias:   晨+0.08 / 深夜-0.08    │
 │     calmnessBias: 风暴-0.15 / 晴+0.03   │
 │     intimacyBias: 深夜+0.08 / 冬+0.04   │
-│     ...                                  │
+│     dominanceBias: —                     │
+│     prideBias:     —                     │
+│                                           │
+│  示例: 伦敦，下午3点，冬雨8°C，战时           │
+│  → [0.31, 0.57, 0.10, 0.64, 0.48, 0.49]  │
+│  (压抑但警觉，同舟共济)                      │
+│  而非默认的 [0.5, 0.5, 0.5, 0.5, 0.5, 0.5] │
 └──────────────────────────────────────────┘
 ```
 
-**示例**：伦敦，下午3点，冬雨8°C，战时
-→ 情绪基线 = [0.31, 0.57, 0.10, 0.64, 0.48, 0.49]（压抑但警觉，同舟共济）
-而非默认的 [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+**AmbientContext 不包含 WHO(归 IWM 层)、WHAT/HOW(归 signals.ts)、WHY(归 planning.ts)。** 严格边界：只做时间·地点·天气 → 情绪基线偏移。
 
 ---
 
-## 单轮对话完整数据流
+## 注册即 Cold Start
+
+注册不是建账户，而是给 NaNaGi 的"第一印象"——这是 GNN Cold Start 的解决时刻。
+
+### 引导式注册表单
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  你好～我是 NaNaGi ✨ 在开始之前，让我认识一下你吧                    │
+│                                                                  │
+│  📛 你的名字                                                     │
+│  [_______________]                                               │
+│                                                                  │
+│  🎭 你的身份                                                     │
+│  ○ 我是来面试南志锦的 (面试官)                                     │
+│  ○ 我只是随便看看 (普通用户)                                       │
+│                                                                  │
+│  ── 面试官专属 ↓ ──────────────────────────────────────         │
+│                                                                  │
+│  🏢 公司                                                        │
+│  [_______________]  例: 字节跳动                                  │
+│                                                                  │
+│  💼 招聘岗位                                                     │
+│  [_______________]  例: Agent应用开发工程师                        │
+│                                                                  │
+│  🔍 我关注的技术方向 (可多选)                                      │
+│  □ 推荐系统    □ GNN/图神经网络  □ Agent/AI Agent                  │
+│  □ 计算机视觉  □ NLP           □ 音频/音乐检索                     │
+│  □ 后端工程    □ 数据处理/Spark □ 模型部署/MLOps                    │
+│  □ 其他: [_______________]                                       │
+│                                                                  │
+│  📋 我想了解 (可多选)                                              │
+│  □ 南志锦的GNN社交图谱项目                                        │
+│  □ CnnMusic多模态召回项目                                         │
+│  □ FruitCNN水果识别项目                                           │
+│  □ 南志锦的整体技术能力                                           │
+│  □ 项目背后的设计决策                                             │
+│                                                                  │
+│  ── 通用 ↓ ──────────────────────────────────────────────      │
+│                                                                  │
+│  🔑 设置密码 (下次用这个登录)                                      │
+│  [_______________]                                               │
+│                                                                  │
+│  [开始对话 ✨]                                                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 后端处理
+
+表单直接映射到 IWM 初始化，不需要 NLP 提取：
+
+```typescript
+function initIWMFromForm(form: RegisterForm): IWMNode {
+  return {
+    personId: `guest-${nanoid(12)}`,
+    name: form.name,
+    role: form.identity === "面试官" ? "guest-iv" : "guest",
+    identity: form.identity,
+    
+    traits: IDENTITY_BASELINE[form.identity],  // 身份 → 初始 traits
+    
+    knownFacts: [
+      form.identity === "面试官"
+        ? [`${form.company}面试官`, `招聘${form.role}`]
+        : [],
+      ...form.techInterests.map(t => `关注${t}`),
+      ...form.wantToKnow.map(w => `想了解${w}`),
+    ].flat().filter(Boolean),
+    
+    topicInterests: mapToProjects(form.techInterests, form.wantToKnow),
+    company: form.company || null,
+    jobRole: form.role || null,
+    
+    firstMet: new Date().toISOString(),
+    totalTurns: 0,
+    historyDensity: 0.0,
+  };
+}
+```
+
+### 登录
+
+```
+personId + password → LevelDB O(1) get('user:{personId}')
+→ bcrypt.compare → 签发 JWT { personId, role, name, identity }
+→ 加载已有 IWM Node
+```
+
+**personId 即节点唯一标识。不存在"用户名搜索"。O(1) 直接索引。**
+
+---
+
+## Cell 隔离记忆架构
+
+与 ChatGPT 同类设计：每个新对话 Cell 是独立的上下文容器，其他 Cell 的内容不进当前上下文。IWM、显性记忆、面试反馈跨 Cell 累积。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Cell 1 (GNN项目面试)      Cell 2 (随便聊聊)      Cell 3 (新对话)  │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐  │
+│  │ 完整聊天记录      │    │ 完整聊天记录      │    │ 空的         │  │
+│  │ (前端显示, 持久化) │    │ (前端显示, 持久化) │    │             │  │
+│  └─────────────────┘    └─────────────────┘    └─────────────┘  │
+│         │                      │                      │         │
+│         └──────────────────────┴──────────────────────┘         │
+│                              │                                   │
+│                    跨 cell 累积 (不进 LLM 上下文)                  │
+│                              │                                   │
+│         ┌────────────────────┼────────────────────┐             │
+│         ▼                    ▼                    ▼             │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐       │
+│  │ IWM Node    │    │ 显性记忆      │    │ 面试反馈      │       │
+│  │ (6 traits)  │    │ (mem表)      │    │ (feedback表)  │       │
+│  │ 跨cell累积   │    │ 跨cell累积    │    │ 仅面试官      │       │
+│  └─────────────┘    └──────────────┘    └──────────────┘       │
+│                                                                  │
+│  每个新 cell 启动时注入 System Prompt (不超 ~1500 tokens):        │
+│    [关系感知] ← IWM 摘要 (~150字)                                 │
+│    [已有记忆] ← 显性记忆 (已有机制)                                │
+│    [上次对话] ← 上一 cell 摘要 (~200字, 存 conv 表)               │
+│                                                                  │
+│  ❌ 不注入: 其他 cell 的完整聊天历史                                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 为什么不用全量历史进上下文
+
+1. 上下文膨胀导致 LLM 推理质量下降（注意力稀释）
+2. Token 成本线性增长
+3. 旧对话中的错误/误导信息会污染新对话
+
+### 对话摘要
+
+每个 Cell 结束时用独立轻量 LLM 调用生成 ~200 字摘要，存储到 `conv:{personId}:{cellId}`。新 Cell 启动时，只注入最近一个 Cell 的摘要——不是所有历史的摘要。
+
+```typescript
+// Cell 结束时
+async function summarizeCell(messages: AgentMessage[]): Promise<string> {
+  const response = await fetch(DEEPSEEK_URL, {
+    body: JSON.stringify({
+      model: "deepseek-chat",
+      max_tokens: 300,
+      messages: [
+        { role: "system", content: "将对话总结为200字以内的摘要。包含: 对方是谁、聊了什么、任何值得下次参考的信息。" },
+        { role: "user", content: messages.map(m => `${m.role}: ${m.content}`).join('\n') }
+      ]
+    })
+  });
+  return response.json().choices[0].message.content;
+}
+```
+
+---
+
+## 完整对话数据流
 
 ```
 POST /api/chat
+  → JWT { personId, role, name, identity }
       │
       ▼
-┌─ STEP 0: 加载 IWM Node [1][2][3] ────────────────┐
-│  data/graph/{personId}.json → IWMNode             │
-│  新节点 → 从通道基线初始化 [19]                      │
-│  根据 elapsed time 计算弹簧拉回 [10]                 │
+┌─ STEP 0: 加载 IWM Node ──────────────────────────┐
+│  role=admin → data/admin/nanzhijin-iwm.json      │
+│  role=guest* → LevelDB get('iwm:{personId}')     │
+│  新节点 → 从注册表单数据初始化                      │
+│  根据 elapsed time 计算弹簧拉回 [10]               │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 1: 环境感知 [6][7] ─────────────────────────┐
-│  IP → 地点 → 天气 → 时间 → ambientMood             │
-│  输出情绪基线偏移                                    │
+│  request.ip → geoip-lite → city/coords            │
+│  coords → 和风API → 天气                           │
+│  时间 → timeOfDay(7段)/season/holiday/对话间隔     │
+│  → ambientMood (6维情绪基线偏移)                    │
 └────────────────────┬──────────────────────────────┘
                      ▼
-┌─ STEP 2: 外部信号提取 ────────────────────────────┐
+┌─ STEP 2: 外部信号提取 (signals) ──────────────────┐
 │  情感词典扫描 / 句法模板 / 消息元数据 / 提及检测      │
-│  → ExternalSignals (确定性算法，不经LLM)            │
+│  → ExternalSignals (确定性算法，不经 LLM)           │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 3: OCC 情绪评价 [8] ────────────────────────┐
 │  signals → OCC 3维评价 → EmotionDelta              │
 │  感知 IWM Node [1]: respect高 → 批评被解释为帮助    │
-│  更新情绪 + 更新 IWM Node                          │
+│  更新情绪 + 更新当前 IWM Node                       │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 4: 双弹簧拉回 [10] + 通道钳制 ──────────────┐
-│  Self K=0.05(极慢) / IWM K=adaptive               │
-│  guest clamp[0.3,0.7] / admin clamp[0,1]          │
-│  钳制机制对应 Gross 反应调节策略 [12]                │
+│  Self K=0.05 (极慢) / IWM K=adaptive              │
+│  guest clamp[0.3, 0.7] / admin clamp[0, 1]        │
+│  钳制对应 Gross 反应调节策略 [12]                    │
 └────────────────────┬──────────────────────────────┘
                      ▼
-┌─ STEP 4.5: 图消息传递 [条件: mentionsPerson] ──────┐
+┌─ STEP 4.5: 图消息传递 ────────────────────────────┐
+│  [条件: role=admin + mentionsPerson]                │
 │  主人提到克劳德 → Heider 平衡传播 [4] → 节点更新     │
+│  guest 通道: 不触发 (不做图传播)                     │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 5: 内心独白 [条件触发] ──────────────────────┐
 │  触发: |Δ|>0.15 OR selfDisclosure OR round%5==0   │
 │        OR mentionsPerson OR firstMeeting           │
-│  高通路 LLM 调用 [9] (max_tokens=200, 无tools)     │
-│  → 反思文本 → data/inner/                          │
+│  高通路 LLM 调用 [9] (max_tokens=200, 无 tools)    │
+│  → ReflectionText → data/self/inner/               │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 6: 社交规划 SIP [11] ───────────────────────┐
 │  编码→解释(感知IWM+ToM [13])→澄清目标→              │
 │  生成策略(Gross 5策略池 [12])→评估选择→执行           │
-│  guest: 预设4目标 / admin: 0义务涌现 [14]            │
+│  guest-iv/guest: 预设4目标                          │
+│  admin: 0义务，目标从对话涌现 [14]                    │
 │  → SocialPlan                                      │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 7: 人格过滤 ────────────────────────────────┐
 │  Emotion + IWM + Plan → PersonaParameters [5]      │
 │  8维语气参数 (warmth, formality, playfulness...)   │
+│  IWM感知: intimacy高→warmth高, safety高→playful    │
 │  确定性映射，不经 LLM                                │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 8: System Prompt 组装 ──────────────────────┐
 │  [0] 环境感知 (ambient mood) [6]                   │
-│  [1] 角色层 (role 决定 guest/admin 身份) [5]        │
-│  [2] 关系感知 (IWM 摘要: "你们认识了X轮...") [1]    │
+│  [1] 角色层 (role + identity → 身份描述) [5]        │
+│  [2] 关系感知 (IWM 摘要: "你们认识了X次...") [1]    │
 │  [3] 人格注入 (filter 输出 → 语气参数)              │
-│  [4] 记忆注入 (显性+隐形)                           │
-│  [5] 工具层 (tool descriptions)                    │
-│  [6] 行为准则                                       │
+│  [4] 上次对话 (~200字, 从 conv 表取最近 cell 摘要)   │
+│  [5] 已有记忆 (显性记忆, 现有机制)                   │
+│  [6] 工具层 (tool descriptions)                    │
+│  [7] 行为准则                                       │
+│                                                    │
+│  总长度: ~1500 tokens → 不超模型上下文               │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 9: ReAct 循环 ──────────────────────────────┐
 │  while round < 5:                                  │
 │    LLM(systemPrompt + messages + tools)            │
-│    text → SSE推送 → break                          │
+│    text → SSE 推送 → break                          │
 │    tool_use → 循环检测(hash) → 执行 → 注入 → 继续   │
-│                                                     │
+│                                                    │
 │  三层容灾: 30s超时 → 重试1次 → 降级回复              │
+│    降级措辞因 role 不同:                             │
+│      guest: "抱歉呢，服务暂时有点小麻烦～"            │
+│      admin: "主人...大脑好像卡住了，能等一下吗？"      │
 └────────────────────┬──────────────────────────────┘
                      ▼
 ┌─ STEP 10: 后处理 ─────────────────────────────────┐
-│  情绪持久化 → data/inner/emotion-state.json        │
-│  IWM 持久化 → data/graph/{personId}.json           │
-│  图日志     → data/graph/graph-log.jsonl           │
-│  内心独白   → data/inner/inner-{ts}.md             │
-│  显性记忆   → data/memory/mem-{ts}.md              │
+│  情绪持久化 → data/self/emotion-state.json         │
+│  IWM 持久化 → admin:fs / guest:LevelDB             │
+│  情绪审计 → data/self/emotion-log.jsonl (全局)     │
+│  对人情绪轨迹 → iwm:{personId} (LevelDB)            │
+│  内心独白 → data/self/inner/inner-{ts}.md          │
+│  显性记忆 → admin:fs / guest:LevelDB               │
+│  Cell 摘要 → LevelDB conv:{personId}:{cellId}       │
+│  面试反馈 → LevelDB feedback:{personId}             │
+│    (仅 guest-iv, 对话中检测到评价/岗位信号时)        │
 └───────────────────────────────────────────────────┘
+```
+
+---
+
+## 三层分级存储架构
+
+### 设计原则
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  不是所有数据都应该进同一个存储系统。                                  │
+│                                                                  │
+│  NaNaGi 本体的数据 (情绪、独白、自我模型):                           │
+│    → 文件系统。每次对话必读, sub-ms 延迟。可 cat/编辑器直接看。       │
+│                                                                  │
+│  南志锦的数据 (认证、IWM、记忆):                                    │
+│    → 文件系统。与 NaNaGi 本体同层但独立目录。可审计、可编辑。          │
+│                                                                  │
+│  所有 guest 用户的数据 (认证、IWM、记忆、反馈、Cell):                │
+│    → LevelDB。O(1) key 查找。嵌入式，零网络。事务安全。              │
+│                                                                  │
+│  显性记忆 (跨角色):                                                │
+│    → admin 用文件系统 (可审计哲学保留)                               │
+│    → guest 用 LevelDB (扩展性 + 数据安全)                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 目录结构
+
+```
+data/
+├── self/                          ← 🦊 NaNaGi 本体 (文件系统, sub-ms)
+│   ├── self-node.json             ← Self-Node: 7 traits + anchor
+│   ├── emotion-state.json         ← 当前 6维情绪 + ambientMood
+│   ├── emotion-log.jsonl          ← 情绪变化审计 (append-only)
+│   └── inner/                     ← 内心世界
+│       └── inner-{ts}.md          ← 内心独白文本
+│
+├── admin/                         ← 👑 南志锦专属 (文件系统, 可审计)
+│   ├── nanzhijin.json             ← 主人认证 {passwordHash, role}
+│   ├── nanzhijin-iwm.json         ← 主人 IWM Node
+│   └── memories/                  ← 主人相关显性记忆
+│       ├── MEMORY.md              ← 记忆索引
+│       └── mem-{ts}.md            ← 记忆文件 (YAML frontmatter)
+│
+├── leveldb/                       ← 🌐 所有 guest 用户
+│   │                                classic-level (MIT许可证)
+│   │                                纯本地 C++ 编译, 零网络依赖
+│   │                                不依赖任何 Google 服务器
+│   │
+│   ├── user:{personId}            ← 用户认证表
+│   ├── iwm:{personId}             ← IWM 节点表
+│   ├── mem:{personId}:{ts}        ← 用户记忆表
+│   ├── emo:{personId}:{ts}        ← 情绪轨迹表
+│   ├── conv:{personId}:{cellId}   ← Cell 会话表
+│   └── feedback:{personId}        ← 🆕 面试反馈表 (仅 guest-iv)
+│
+└── memory/                        ← 显性记忆 (现有, V2.5)
+    ├── MEMORY.md
+    └── mem-{ts}.md
+```
+
+### 统一接口
+
+```typescript
+// lib/store.ts — 统一数据访问层
+// 调用方不感知底层是文件系统还是 LevelDB
+
+// IWM
+store.getNode(personId) → IWMNode | null
+store.putNode(personId, node) → void
+
+// Memory
+store.createMemory(record) → void
+store.listMemories(personId) → MemoryEntry[]
+
+// Cell
+store.createCell(personId, cellId, messages) → void
+store.getCellSummary(personId, cellId) → string
+
+// Feedback (仅 guest-iv)
+store.appendFeedback(personId, record) → void
+store.getFeedback(personId) → FeedbackRecord | null
+```
+
+### 为什么是 LevelDB
+
+| 方案 | 适合？ | 理由 |
+|------|--------|------|
+| 文件系统 | ❌ (用户层) | 并发写不安全，无事务，5000+用户后目录膨胀 |
+| SQLite | 🟡 | 功能满足，但设计红线里文件系统哲学保留给 NaNaGi 本体 |
+| **LevelDB** | ✅ | 嵌入式 K-V，MIT 许可证，Chrome 内置同款引擎，百万级 O(1)，零网络依赖 |
+| LanceDB | 🟡 | 计划做向量检索 (P2)。K-V 不是它最佳场景 |
+| Redis | ❌ | 需独立部署，对个人项目过重 |
+| PostgreSQL | ❌ | 同上 |
+| Spark | ❌ | 离线批处理引擎，登录延迟 30 秒以上 |
+
+**JD 对齐**：职责 3 (性能优化) → LevelDB O(1) + 嵌入式无网络开销；职责 4 (框架沉淀) → `lib/store.ts` 接口可替换；职责 6 (上线落地) → 文件系统不安全 → LevelDB 事务安全。
+
+---
+
+## LevelDB 六表 Schema
+
+### Table 1: `user` — 用户认证
+
+```
+Key:   "user:{personId}"
+Value: {
+  personId, name, passwordHash (bcrypt),
+  role ("guest-iv" | "guest"),
+  identity ("面试官" | "普通用户"),
+  company, jobRole (面试官专属),
+  techInterests[], wantToKnow[],
+  createdAt, lastLogin
+}
+```
+
+### Table 2: `iwm` — IWM 节点
+
+```
+Key:   "iwm:{personId}"
+Value: {
+  personId, name, role, identity,
+  traits: { safety, intimacy, care, respect, reliability, understanding },
+  anchor: { safety: {value, springK}, ... },
+  knownFacts[], topicInterests[],
+  company, jobRole,  // 面试官专属
+  firstMet, lastTalk, totalTurns, historyDensity,
+  emotionTimeline: [{date, avgHappiness, avgIntimacy}]
+}
+```
+
+### Table 3: `mem` — 用户记忆
+
+```
+Key:   "mem:{personId}:{timestamp}"
+Value: {
+  slug, personId,
+  meta: { name, description, type, tags, createdAt },
+  content (YAML frontmatter + Markdown),
+  summary, keywords[]
+}
+```
+
+### Table 4: `emo` — 情绪轨迹
+
+```
+Key:   "emo:{personId}:{timestamp}"
+Value: {
+  timestamp, personId, roundNumber,
+  before: { happiness, energy, dominance, intimacy, pride, calmness },
+  delta: { happiness, energy, dominance, intimacy, pride, calmness },
+  trigger: { type ("praise"|"criticism"|"selfDisclosure"|...), summary },
+  ambientMood: { happinessBias, energyBias, calmnessBias, ... }
+}
+```
+
+### Table 5: `conv` — Cell 会话
+
+```
+Key:   "conv:{personId}:{cellId}"
+Value: {
+  cellId, personId,
+  startedAt, endedAt, messageCount,
+  topicSummary, toolCallsUsed[],
+  emotionStart, emotionEnd,
+  summary (200字对话摘要, 独立LLM生成)
+}
+
+额外 Key:
+  "conv:{personId}:last-summary" → 最新 cell 的摘要 (新 cell 注入用)
+```
+
+### Table 6: `feedback` — 面试反馈 (仅 guest-iv)
+
+```
+Key:   "feedback:{personId}"
+Value: {
+  personId, name,
+  records: [{
+    timestamp, sessionId, cellId,
+    company, role, impression (自然语言),
+    projectInterest[], quotes[]
+  }],
+  summary (NaNaGi 自动更新的总结)
+}
 ```
 
 ---
 
 ## GNN 概念映射
 
-NaNaGi 的社交图与南志锦的 GNN 项目形成学术对称 [19]：
+NaNaGi 的社交图与南志锦的 GNN 社交图谱链接预测项目形成学术对称 [19]：
 
 | GNN 概念 | NaNaGi 对应 | 心理学对应 |
 |---------|------------|-----------|
 | Node Embedding | Self/IWM node traits 向量 | Internal Working Model [1] |
 | Edge Weight | intimacy × density | 依恋强度 [1] |
-| Message Passing | 主人提到克劳德 → 沿边传播 | Heider 平衡 [4] |
+| Message Passing | 主人提到克劳德 → 沿边传播 (仅 admin) | Heider 平衡 [4] |
 | Link Prediction | 新 guest 值得信任多少？ | 社会认知 [13] |
-| Cold Start | 新节点从通道基线初始化 | 第一印象形成 [1] |
+| Cold Start | 注册表单 → 初始化 IWM Node | 第一印象形成 [1] |
 | GraphSAGE Aggregation [19] | 聚合所有已知节点 → 全局状态 | Object Relations [16][17] |
+| Embedding Update | 每轮对话更新 IWM 维度 | 印象更新 |
 
 ---
 
-## 参考文献
+## 学术支撑
+
+本项目参考了 19 个心理学和机器学习理论模型。每个引用对应一个具体的设计模块。
+
+### 参考文献
 
 1. **Bowlby, J.** (1969). *Attachment and Loss, Vol. 1: Attachment*. New York: Basic Books. — 依恋理论与内部工作模型 (IWM) 的基础。
 
-2. **Bowlby, J.** (1973). *Attachment and Loss, Vol. 2: Separation: Anxiety and Anger*. New York: Basic Books. — 安全基地的形成与破坏机制。IWM Node 的 safety 维度与弹簧拉回动力学来源。
+2. **Bowlby, J.** (1973). *Attachment and Loss, Vol. 2: Separation: Anxiety and Anger*. New York: Basic Books. — 安全基地的形成与破坏。IWM Node safety 维度 + 弹簧拉回动力学来源。
 
-3. **Bretherton, I., & Munholland, K. A.** (2008). Internal working models in attachment relationships: Elaborating a central construct in attachment theory. In J. Cassidy & P. R. Shaver (Eds.), *Handbook of Attachment* (pp. 102–127). Guilford Press. — IWM 作为图节点的理论支持，每个人心中对重要他人有独立的、结构化的表征。
+3. **Bretherton, I., & Munholland, K. A.** (2008). Internal working models in attachment relationships: Elaborating a central construct in attachment theory. In J. Cassidy & P. R. Shaver (Eds.), *Handbook of Attachment* (pp. 102–127). Guilford Press. — IWM 作为图节点的理论支持。
 
-4. **Heider, F.** (1958). *The Psychology of Interpersonal Relations*. New York: Wiley. — 平衡理论：P–O–X 三角关系中的态度传播。NaNaGi 社交图的 Message Passing 机制来源。
+4. **Heider, F.** (1958). *The Psychology of Interpersonal Relations*. New York: Wiley. — P–O–X 平衡理论。社交图 Message Passing 机制来源 (仅 admin 通道)。
 
-5. **Jung, C. G.** (1953). The persona as a segment of the collective psyche. In *Collected Works, Vol. 7: Two Essays on Analytical Psychology* (R. F. C. Hull, Trans., pp. 156–171). Princeton University Press. (Original work published 1943) — 人格面具：同一自我在不同社交情境中呈现不同面向，persona 不等于深层 self。双通道系统（guest/admin）的理论基础。
+5. **Jung, C. G.** (1953). The persona as a segment of the collective psyche. In *Collected Works, Vol. 7: Two Essays on Analytical Psychology* (R. F. C. Hull, Trans., pp. 156–171). Princeton University Press. (Original work published 1943) — 人格面具：同一自我在不同社交情境中呈现不同面向。双通道系统的理论基础。
 
-6. **Mehrabian, A., & Russell, J. A.** (1974). *An Approach to Environmental Psychology*. Cambridge, MA: MIT Press. — PAD 情绪三维模型（Pleasure–Arousal–Dominance）。六维情绪空间的前三维 + 物理环境对情绪的影响（AmbientContext 的环境输入假说）。
+6. **Mehrabian, A., & Russell, J. A.** (1974). *An Approach to Environmental Psychology*. Cambridge, MA: MIT Press. — PAD 情绪三维模型 (Pleasure–Arousal–Dominance)。物理环境对情绪的影响 — AmbientContext 的环境输入假说。
 
-7. **Plutchik, R.** (1980). *Emotion: A Psychoevolutionary Synthesis*. New York: Harper & Row. — 情绪轮理论，基本情绪的分类与强度变化。intimacy/pride/calmness 三个额外维度的选择依据。
+7. **Plutchik, R.** (1980). *Emotion: A Psychoevolutionary Synthesis*. New York: Harper & Row. — 情绪轮理论。intimacy/pride/calmness 三个额外维度的选择依据。
 
-8. **Ortony, A., Clore, G. L., & Collins, A.** (1988). *The Cognitive Structure of Emotions*. Cambridge University Press. — OCC 评价模型：情绪源于对事件的三维认知评价（目标相关性/期望一致性/因果归因）。Step 3 OCC 情绪评价引擎的直接映射。
+8. **Ortony, A., Clore, G. L., & Collins, A.** (1988). *The Cognitive Structure of Emotions*. Cambridge University Press. — OCC 评价模型：情绪源于对事件的三维认知评价 (目标相关性/期望一致性/因果归因)。Step 3 OCC 情绪评价引擎的直接映射。
 
-9. **LeDoux, J. E.** (1996). *The Emotional Brain: The Mysterious Underpinnings of Emotional Life*. New York: Simon & Schuster. — 双通路情绪理论：低通路（杏仁核快路，<20ms）与高通路（皮层慢路，300–500ms）。低通路 = OCC 规则引擎 (<1ms)；高通路 = 内心独白 LLM 调用 (1–3s)。
+9. **LeDoux, J. E.** (1996). *The Emotional Brain: The Mysterious Underpinnings of Emotional Life*. New York: Simon & Schuster. — 双通路情绪理论：低通路 (杏仁核快路, <20ms) 与高通路 (皮层慢路, 300–500ms)。低通路 = OCC 规则引擎；高通路 = 内心独白 LLM 调用。
 
-10. **McEwen, B. S., & Stellar, E.** (1993). Stress and the individual: Mechanisms leading to disease. *Archives of Internal Medicine*, 153(18), 2093–2101. — Allostatic Load 理论：生物系统通过改变设定点（allostasis）适应长期压力。弹簧力学（K 系数 + 锚点拉回）的生物学基础。
+10. **McEwen, B. S., & Stellar, E.** (1993). Stress and the individual: Mechanisms leading to disease. *Archives of Internal Medicine*, 153(18), 2093–2101. — Allostatic Load 理论：生物系统通过改变设定点 (allostasis) 适应长期压力。弹簧力学 (K 系数 + 锚点拉回) 的生物学基础。
 
-11. **Crick, N. R., & Dodge, K. A.** (1994). A review and reformulation of social information-processing mechanisms in children's social adjustment. *Psychological Bulletin*, 115(1), 74–101. — SIP 六步社交信息加工模型：编码→解释→澄清目标→生成策略→评估→执行。Step 6 社交规划的直接蓝图。
+11. **Crick, N. R., & Dodge, K. A.** (1994). A review and reformulation of social information-processing mechanisms in children's social adjustment. *Psychological Bulletin*, 115(1), 74–101. — SIP 六步社交信息加工模型。Step 6 社交规划的直接蓝图。
 
-12. **Gross, J. J.** (1998). The emerging field of emotion regulation: An integrative review. *Review of General Psychology*, 2(3), 271–299. — 五大情绪调节策略：情境选择/情境修正/注意分配/认知重评/反应调节。SIP Step 4 的策略池 + 通道差异（guest 多用反应调节，admin 可用情境选择）。
+12. **Gross, J. J.** (1998). The emerging field of emotion regulation: An integrative review. *Review of General Psychology*, 2(3), 271–299. — 五大情绪调节策略：情境选择/情境修正/注意分配/认知重评/反应调节。SIP Step 4 策略池 + 通道差异的来源。
 
-13. **Premack, D., & Woodruff, G.** (1978). Does the chimpanzee have a theory of mind? *Behavioral and Brain Sciences*, 1(4), 515–526. — Theory of Mind：推断他人心理状态的能力。SIP Step 2（解释线索）+ IWM Node `understanding` 维度的认知基础。
+13. **Premack, D., & Woodruff, G.** (1978). Does the chimpanzee have a theory of mind? *Behavioral and Brain Sciences*, 1(4), 515–526. — Theory of Mind：推断他人心理状态的能力。SIP Step 2 (解释线索) + IWM Node understanding 维度的认知基础。
 
-14. **Deci, E. L., & Ryan, R. M.** (2000). The "what" and "why" of goal pursuits: Human needs and the self-determination of behavior. *Psychological Inquiry*, 11(4), 227–268. — 自我决定理论：自主性（Autonomy）/ 胜任感（Competence）/ 关联性（Relatedness）三大基本心理需求。admin 通道 0 义务设计（自主性）+ IWM Node 的关系维度（关联性）。
+14. **Deci, E. L., & Ryan, R. M.** (2000). The "what" and "why" of goal pursuits: Human needs and the self-determination of behavior. *Psychological Inquiry*, 11(4), 227–268. — 自我决定理论：自主性/胜任感/关联性三大基本心理需求。admin 通道 0 义务设计 (自主性) + IWM Node 的关系维度 (关联性)。
 
-15. **Young, J. E., Klosko, J. S., & Weishaar, M. E.** (2003). *Schema Therapy: A Practitioner's Guide*. New York: Guilford Press. — 图式疗法：早期形成的核心人格结构（Early Maladaptive Schemas）稳定且难以改变。Self-Node 作为"性格硬件"（K=0.05 极慢演化）的理论来源。
+15. **Young, J. E., Klosko, J. S., & Weishaar, M. E.** (2003). *Schema Therapy: A Practitioner's Guide*. New York: Guilford Press. — 图式疗法：早期形成的核心人格结构稳定且难以改变。Self-Node 作为"性格硬件" (K=0.05 极慢演化)。
 
-16. **Klein, M.** (1946). Notes on some schizoid mechanisms. *International Journal of Psycho-Analysis*, 27, 99–110. — 内在客体与投射性认同的原初论证。心中对重要他人的表征（inner object）≠ 真实他人本身——IWM Node 作为 representation-not-reality 的核心理论锚点。
+16. **Klein, M.** (1946). Notes on some schizoid mechanisms. *International Journal of Psycho-Analysis*, 27, 99–110. — 内在客体与投射性认同的原初论证。IWM Node 作为 representation-not-reality 的核心理论锚点。
 
-17. **Klein, M.** (1957). *Envy and Gratitude*. London: Tavistock. — 内在客体世界的情感动力：嫉羡与感恩如何塑造对他人表征的态度。IWM Node 的 care 与 respect 维度——她对某个人的在意或疏远，源自互动中积累的情感体验，而非预设。
+17. **Klein, M.** (1957). *Envy and Gratitude*. London: Tavistock. — 内在客体世界的情感动力：嫉羡与感恩如何塑造对他人表征的态度。IWM Node 的 care 与 respect 维度来源。
 
-18. **Winnicott, D. W.** (1965). *The Maturational Processes and the Facilitating Environment*. London: Hogarth Press. — 过渡性客体与促进性环境：健康的心理发展需要足够好的照料。IWM Node 的 safety 与 intimacy 维度——安全感与亲近感来自互动质量，而非一次性设定。
+18. **Winnicott, D. W.** (1965). *The Maturational Processes and the Facilitating Environment*. London: Hogarth Press. — 促进性环境：健康的心理发展需要足够好的照料。IWM Node 的 safety 与 intimacy 维度来源。
 
 19. **Hamilton, W. L., Ying, R., & Leskovec, J.** (2017). Inductive representation learning on large graphs. *Advances in Neural Information Processing Systems*, 30. — GraphSAGE：归纳式图节点嵌入学习。社交图的 Message Passing 与节点更新机制的数学对应。
 
 ---
 
-## 当前状态
+## 当前状态与路线图
 
-### 已实现 ✅
+### 已实现 ✅ (V2.5)
 
-| 功能 | 说明 | 对应引用 |
-|------|------|---------|
-| NaNaGi Agent 对话 | DeepSeek V4 Pro 引擎，Anthropic 兼容端点，流式 SSE | — |
-| 密码鉴权 | bcrypt 双密码 + JWT 角色 + httpOnly cookie | — |
-| 混元生图 | 腾讯混元 hy-image-v3.0，异步 submit + 轮询 query | — |
-| 可拖拽图片 | 聊天框内图片可拖拽，松手弹回，带下载按钮 | — |
-| 唱片机互动 | 项目页拖图片进唱片机 → 魔法扫描识别动画 | — |
-| 记忆系统 | Claude Code 风格文件记忆，双路径架构 | — |
-| 记忆面板 | 左侧滑出，像素风卡片，悬浮放大，管理员删除 | — |
-| 记忆注入 | 每次对话自动注入已有记忆到 System Prompt | — |
-| 聊天持久化 | sessionStorage 跨页面导航保持 + 刷新恢复 | — |
-| 项目展厅 | 3 个项目页（FruitCNN / CnnMusic / GNN），SSG 预渲染 | — |
-| 三风格设计系统 | 女仆围裙 + 像素下午茶 + 星尘备忘录 | — |
-
-### 规划中 🔮
-
-| 阶段 | 内容 |
+| 功能 | 说明 |
 |------|------|
-| **V2.6** | ReAct 循环 + 9 工具 + 三层容灾 + System Prompt 六段式拼接 |
-| **V2.7** | 社交图引擎 (graph.ts) [1][4][19] + OCC 情绪引擎 [8] + 双弹簧 [10] + AmbientContext [6] |
-| **V2.8** | SIP 社交规划 [11] + 人格过滤层 [5] + 内心独白 [9] + 隐形记忆 |
-| **V3** | RAG 向量检索 (LanceDB) + Multi-Agent 编排 |
-| **后续** | CNN ONNX 推理 / GNN FastAPI / CnnMusic FAISS / 腾讯云部署 |
+| NaNaGi Agent 对话 | DeepSeek V4 Pro 引擎，Anthropic 兼容端点，流式 SSE |
+| 密码鉴权 | bcrypt 双密码 + JWT + httpOnly cookie |
+| 混元生图 | 腾讯混元 hy-image-v3.0，异步 submit + 轮询 query |
+| 可拖拽图片 | 聊天框内图片可拖拽，松手弹回，带下载按钮 |
+| 唱片机互动 | 项目页拖图片进唱片机 → 魔法扫描识别动画 |
+| 记忆系统 | 文件记忆双路径架构 |
+| 记忆面板 | 左侧滑出，像素风卡片，悬浮放大，管理员删除 |
+| 记忆注入 | 每次对话自动注入已有记忆到 System Prompt |
+| 聊天持久化 | sessionStorage 跨页面导航保持 + 刷新恢复 |
+| 项目展厅 | 3 个项目页 (FruitCNN / CnnMusic / GNN)，SSG 预渲染 |
+| 三风格设计系统 | 女仆围裙 + 像素下午茶 + 星尘备忘录 |
+
+### 路线图
+
+| 阶段 | 内容 | 对应 JD 职责 | 预计 |
+|------|------|-------------|------|
+| **V2.6 (P0)** | ReAct 循环 + 9 工具 + 三层容灾 + 六段式 Prompt + route.ts 重构 + middleware personId 注入 | 1/2/3 | Week 1 |
+| **V2.7 (P1)** | 社交图引擎 (graph.ts) + OCC 情绪引擎 (emotion.ts) + 双弹簧 + AmbientContext + signals.ts | 4/5 | Week 2 |
+| **V2.8 (P1)** | SIP 社交规划 (planning.ts) + 人格过滤 (filter.ts) + 内心独白 (inner-voice.ts) + 隐形记忆 | 4/5 | Week 2 |
+| **V2.9 (P2)** | 三个展厅结构化数据填充 + Agent 知识库可检索 | 1 | Week 3 |
+| **V3.0 (P3)** | 性能量化 + 并发设计 + 上线部署 (腾讯云) | 3/6 | 上线前 |
+| **V3.1 (P4)** | 技术博客 + MCP 协议评估 + 双通道对比 demo | 5 | 上线前 |
 
 ---
 
 ## 字节 JD 差距审计
 
-> 对照：字节跳动 Agent应用开发工程师-ArkClaw（A156568）六条职责
+> 对照：字节跳动 Agent应用开发工程师-ArkClaw (A156568) 六条职责
 > 审计日期：2026-06-07
 
 ### 覆盖度总览
 
 ```
-职责 1 (架构/Skills):  ████░░░░ 40%  — 记忆库有，Skills/知识库空
-职责 2 (任务规划):      ██░░░░░░ 20%  — 设计完整，代码为零
-职责 3 (性能/容灾):     ███░░░░░ 30%  — SSE有，其余设计好但未实现
-职责 4 (框架沉淀):      ██░░░░░░ 20%  — 设计里解耦了，代码全混在 route.ts
-职责 5 (前沿跟踪):      ████████░ 80%  — 14引用+GNN映射，超纲
-职责 6 (上线落地):      ███░░░░░ 30%  — UI优秀，版本记录好，未上线
+职责 1 (架构/Skills):  ████░░░░ 40%
+职责 2 (任务规划):      ██░░░░░░ 20%
+职责 3 (性能/容灾):     ███░░░░░ 30%
+职责 4 (框架沉淀):      ██░░░░░░ 20%
+职责 5 (前沿跟踪):      ████████░ 80%
+职责 6 (上线落地):      ███░░░░░ 30%
 
 综合: ~37%
 ```
 
 ### 逐条审计
 
-#### 职责 1：Agent 应用整体架构设计与核心功能开发
-
-> "大模型适配、记忆库、知识库、Skills 等核心模块"
+**职责 1 — Agent 应用整体架构设计与核心功能开发**
 
 | 子项 | 现状 | 评级 |
 |------|------|------|
-| 大模型适配 | DeepSeek V4 Pro 单模型，直连。无 failover、无模型切换、无 key rotation | 🟡 |
-| 记忆库 | 文件记忆双路径 + 记忆注入 ✅ | 🟢 |
-| **知识库** | 3 个项目展厅骨架（FruitCNN/CnnMusic/GNN），内容为空。Agent 无法检索项目信息来回答"南志锦做了什么项目" | 🔴 |
-| **Skills 系统** | 5 个工具散落在 `types.ts` 常量数组里，无注册表、无标准 execute 接口、无动态加载。工具调用是单次"调用→跟一次回复"，不是完整的 Agent loop | 🔴 |
-| IWM + 社交图 | 设计完整（14 个学术引用），代码为空。JD 没要求，属于超纲加分项 | 🟢📋 |
+| 大模型适配 | DeepSeek V4 Pro 单模型，直连。无 failover/模型切换/key rotation | 🟡 |
+| 记忆库 | 文件记忆双路径 + 记忆注入 | 🟢 |
+| **知识库** | 3 个项目展厅骨架，内容为空。Agent 无法检索项目信息 | 🔴 |
+| **Skills 系统** | 5 个工具散落在 types.ts，无注册表，无标准 execute 接口，无 ReAct 多轮 loop | 🔴 |
 
-#### 职责 2：任务规划、逻辑推理、决策执行
-
-> "设计并实现Agent的任务规划、逻辑推理、决策执行等核心能力"
+**职责 2 — 任务规划、逻辑推理、决策执行**
 
 | 子项 | 现状 | 评级 |
 |------|------|------|
-| **任务规划** | SIP 六步 + Gross 五策略设计完整（`planning.ts` 未写）| 🔴 |
-| **逻辑推理** | 完全依赖 DeepSeek 自身能力，无框架层 CoT 引导或多步推理增强 | 🟡 |
-| **决策执行** | OCC 评价引擎 + SIP 规划器设计完整，代码空白。单轮 Tool Calling（route.ts 第 419-597 行）只支持一次工具调用+一次跟进回复 | 🔴 |
-| Crick&Dodge SIP [11] | 设计完整——差异化亮点。市场上没有 Agent 项目在社交信息加工模型上做工程落地 | 🟢📋 |
+| **任务规划** | SIP 六步 + Gross 五策略设计完整，代码空白 | 🔴 |
+| **逻辑推理** | 完全依赖 DeepSeek 自身，无框架层 CoT 引导或多步推理增强 | 🟡 |
+| **决策执行** | OCC + SIP 设计完整，代码空白。仅有单轮 Tool Calling | 🔴 |
 
-#### 职责 3：性能优化与稳定性保障
-
-> "响应延迟优化、并发能力提升、错误容灾机制设计等"
+**职责 3 — 性能优化与稳定性保障**
 
 | 子项 | 现状 | 评级 |
 |------|------|------|
-| 响应延迟 | SSE 流式 ✅。但无 TTFT、端到端延迟、工具调用耗时的量化记录 | 🟡 |
-| **并发能力** | 无任何设计。单用户单实例，无会话隔离、无请求队列、无并发安全机制 | 🔴 |
-| 错误容灾 | 三层降级设计完整（30s超时→重试1次→降级回复），但代码未实现。目前 route.ts 没有任何超时控制、重试逻辑、或 fallback 响应 | 🟡 |
-| **性能量化** | 无任何指标记录。JD 要求"优化"，没有基线就无法证明优化效果 | 🔴 |
+| 响应延迟 | SSE 流式。无 TTFT/端到端延迟/工具调用耗时的量化指标 | 🟡 |
+| **并发能力** | 无任何设计 | 🔴 |
+| 错误容灾 | 三层降级设计完整，代码未实现 | 🟡 |
 
-#### 职责 4：沉淀通用 Agent 开发框架
-
-> "沉淀通用Agent开发框架、组件库与技术解决方案，支撑业务快速落地"
+**职责 4 — 沉淀通用 Agent 开发框架**
 
 | 子项 | 现状 | 评级 |
 |------|------|------|
-| **框架解耦** | `agent-core/` vs `nanagi-app/` 的目录分离仅在设计文档里。当前 644 行 `route.ts` 混合了 LLM 调用、工具执行、记忆拦截、System Prompt 组装——全部耦在一起 | 🔴 |
-| 组件库 | AgentDialog、ChatMessage、MemoryPanel 三个可复用组件，但未抽象为独立 UI 库 | 🟡 |
-| 技术方案 | README 含完整架构设计 + 14 学术引用 + GNN 概念映射 + 决策记录 | 🟢 |
-| **可迁移性** | 设计文档声明"换工具集即可变编程 Agent"。代码层面没有任何体现——没有工具注册表、没有 Agent 基类、没有配置驱动的 prompt 组装 | 🔴 |
+| **框架解耦** | agent-core/ vs nanagi-app/ 分离仅在设计文档里。route.ts 644行全耦合 | 🔴 |
+| 组件库 | AgentDialog/ChatMessage/MemoryPanel 可复用但未抽象 | 🟡 |
+| 技术方案 | 完整架构设计 + 19 学术引用 + GNN 映射 + JD 审计 | 🟢 |
 
-#### 职责 5：跟踪 Agent 领域前沿技术
-
-> "调研最新的智能体架构与技术，落地到业务场景中"
+**职责 5 — 跟踪 Agent 领域前沿技术**
 
 | 子项 | 现状 | 评级 |
 |------|------|------|
-| 学术跟踪 | 14 个引用（Bowlby [1][2][3] → GraphSAGE [19]），从发展心理学到图神经网络 | 🟢 |
-| 竞品分析 | Open-AGC 完整评测（代码质量/架构/功能/UI 全维度对比，含可借鉴 6 项+不借鉴 10 项） | 🟢 |
-| **MCP / A2A 协议** | 完全不涉及。如果面试官问"你怎么看 MCP"，需要准备话术而非代码证据 | 🟡 |
-| **技术博客** | 未写。JD 要求"跟踪前沿并落地"——博客是证明技术影响力的最直接方式 | 🟡 |
+| 学术跟踪 | 19 个引用 (Bowlby→GraphSAGE)，从发展心理学到图神经网络 | 🟢 |
+| 竞品分析 | Open-AGC 完整评测 (代码/架构/功能/UI 全维度对比) | 🟢 |
+| **MCP / A2A** | 不涉及 | 🟡 |
+| **技术博客** | 未写 | 🟡 |
 
-#### 职责 6：从需求到上线的全流程落地
-
-> "与产品、算法等团队紧密协作，推动AI Agent产品从需求到上线的全流程落地"
+**职责 6 — 从需求到上线的全流程落地**
 
 | 子项 | 现状 | 评级 |
 |------|------|------|
-| **上线部署** | 未部署。JD 说"从需求到上线的全流程"——没上线就不是"落地" | 🔴 |
-| 版本迭代 | V1→V2→V2.5→v5.0 清晰演进记录，每个版本有决策文档 | 🟢 |
-| UI/产品体验 | 三风格设计系统 + 像素美学 + 唱片机交互 + 可拖拽图片。JD 没要求但绝对加分 | 🟢 |
-| **用户反馈闭环** | 无。没上线就没有用户，没有用户就没有反馈→迭代的证据链 | 🟡 |
+| **上线部署** | 未部署 | 🔴 |
+| 版本迭代 | V1→V2→V2.5→V5.1 清晰演进记录 | 🟢 |
+| UI/产品体验 | 三风格设计系统 + 唱片机 + 可拖拽图片 | 🟢 |
+| **用户反馈闭环** | 无 | 🟡 |
 
-### 致命短板（Top 3）
+### 致命短板 Top 3
 
-**1. 设计→代码鸿沟（影响职责 1/2/3/4）**
-v5.0 架构写了一万多字的设计文档，14 个学术引用，完整的社交图+情绪+社交规划三层架构。但 `src/personality/` 和 `src/agent/` 目录不存在。JD 的每一条职责都要看工程证据。面试官问"SIP 六步在哪"→ 打开 `route.ts` → 644 行单体文件，一个半成品单轮 Tool Calling。
-→ **修复**: Block 3（ReAct 循环 + 工具注册表 + 三层容灾）+ Block 4（route.ts 重构）。最低面试门槛。
+**1. 设计→代码鸿沟 (影响职责 1/2/3/4)**
+v5.1 架构设计完整，19 学术引用，但 `src/personality/` 和 `src/agent/` 目录不存在。面试官问"SIP 六步在哪" → 打开 route.ts → 644 行单体文件。
 
-**2. Skills 系统不存在（影响职责 1/2）**
-JD 把 Skills 列为与记忆库、知识库并列的核心模块。当前工具是散落在 `types.ts` 里的 JSON Schema 常量数组，没有注册表、没有标准 execute 接口。单轮 Tool Calling 不是 ReAct——模型不能自主选择工具→观察结果→按需继续调用→直到任务完成。
-→ **修复**: Block 3a（agent/registry.ts + 9 工具标准化 execute 接口）+ Block 3c（ReAct 多轮循环）。
+**2. Skills 系统不存在 (影响职责 1/2)**
+JD 把 Skills 列为与记忆库、知识库并列的核心模块。当前工具散落在 `types.ts` JSON 常量，无注册表，无 ReAct 多轮循环。
 
-**3. 最强的牌不在评分表上（影响面试策略）**
-社交图、三层心理、AmbientContext、14 个学术引用——JD 没有要求任何一项。这是差异化核武器，但前提是先答完评分表上的基础题。如果面试官问"你的 ReAct 循环怎么实现的"答不出来，这些牌一张都打不出。
-→ **策略**: P0 先完成 JD 基础题（ReAct + Skills + 容灾 + 框架解耦），P1 再把差异化做成可见 demo。
-
-### 修复优先级
-
-| 优先级 | 内容 | 对齐 JD 职责 | 产出物 |
-|--------|------|-------------|--------|
-| **P0** | ReAct 循环 + 9 工具 + 三层容灾 + route.ts 重构 | 1/2/3 | Agent 真正能动，面试官可看代码 |
-| **P1** | 社交图引擎 + 情绪引擎 + AmbientContext | 4/5 | 框架解耦 + 设计差异化转化为代码证据 |
-| **P2** | 三个展厅结构化数据填充 | 1 | Agent 能回答"南志锦做了什么项目" |
-| **P3** | 性能量化 + 并发设计 + 上线部署 | 3/6 | 从"项目"变成"产品" |
-| **P4** | 技术博客 + MCP 评估 + 双通道对比 demo | 5 | 面试前 30 分钟可以打开的东西 |
+**3. 最强的牌不在评分表上 (影响面试策略)**
+社交图、三层心理、AmbientContext、19 学术引用 — JD 没有要求任何一项。先答完评分表上的基础题 (ReAct+Skills+容灾+框架解耦) 再打这张牌。
 
 ### Block × P-Priority 映射
 
 ```
 开发顺序 (Block)           JD优先级 (P)          对齐的JD职责
 ────────────────────────────────────────────────────────────────
-Block 0: types.ts          → P1 (社交图引擎)      职责 5 (前沿跟踪)
-Block 1a: configs          → P0 (被 prompts 调)   职责 1 (Skills)
+Block 0: types.ts          → P1 (社交图引擎)      职责 5
+Block 1a: configs          → P0 (被 prompts 调)   职责 1
                             → P1 (被 emotion/planning 调)
 Block 1b: graph.ts         → P1 (社交图引擎)       职责 4/5
 Block 1c: signals.ts       → P1 (情绪引擎前置)     职责 5
@@ -504,11 +1025,11 @@ Block 2d: inner-voice.ts   → P1 (内心独白)         职责 5
 Block 3a: agent/types      → P0 (ReAct前置)        职责 1
 Block 3a: agent/registry   → P0 (工具注册表)       职责 1
 Block 3a: agent/tools/     → P0 (9工具实现)        职责 1/2
-Block 3b: agent/prompts    → P0 (双通道Prompt)     职责 1
+Block 3b: agent/prompts    → P0 (六段式Prompt)     职责 1
 Block 3c: agent/loop       → P0 (ReAct+容灾)       职责 1/2/3
 Block 4: route.ts+middle   → P0 (集成)             职责 1/3
 ────────────────────────────────────────────────────────────────
-(新) 展厅内容填充           → P2                    职责 1 (知识库)
+(新) 展厅内容填充           → P2                    职责 1
 (新) 性能量化+上线          → P3                    职责 3/6
 (新) 博客+MCP+demo         → P4                    职责 5
 ```
@@ -518,7 +1039,7 @@ Block 4: route.ts+middle   → P0 (集成)             职责 1/3
 ```
 Week 1 — P0 (JD 职责 1/2/3, 最低面试门槛):
   Block 3a (部分) → Block 1a (仅configs) → Block 3b → Block 3c → Block 4
-  产出: ReAct循环 + 9工具 + 三层容灾 + 双通道Prompt + route.ts瘦身
+  产出: ReAct循环 + 9工具 + 三层容灾 + 六段式Prompt + route.ts瘦身
 
 Week 2 — P1 (JD 职责 4/5, 差异化和框架解耦):
   Block 0 (完整) → Block 1b/c/d/e → Block 2a/b/c/d
@@ -526,7 +1047,7 @@ Week 2 — P1 (JD 职责 4/5, 差异化和框架解耦):
 
 Week 3 — P2 (JD 职责 1, 知识库):
   三个展厅结构化数据填充
-  产出: Agent能回答"南志锦做了什么项目"
+  产出: Agent 能回答"南志锦做了什么项目"
 
 上线前 — P3/P4 (JD 职责 3/5/6):
   性能量化 + 并发设计 + 部署 + 博客 + demo
@@ -538,42 +1059,131 @@ Week 3 — P2 (JD 职责 1, 知识库):
 ## 文件结构
 
 ```
-src/
-├── personality/                  ← 🆕 数字人格层 (V2.7-2.8)
-│   ├── types.ts                  ← SelfNode [15], IWMNode [1][3], GraphState,
-│   │                                EmotionState [6][7], AmbientContext, ...
-│   ├── configs/{self,guest,admin}.ts
-│   ├── graph.ts                  ← 社交图: 节点CRUD + 边 + Message Passing [4][19]
-│   ├── emotion.ts                ← OCC评价 [8] + 双弹簧拉回 [10]
-│   ├── ambient-context.ts        ← 时间·地点·天气 → ambientMood [6][7]
-│   ├── signals.ts                ← 外部信号提取 (情感词典/句法/提及)
-│   ├── planning.ts               ← SIP六步 [11] + Gross策略池 [12]
-│   ├── filter.ts                 ← 人格过滤: emotion+IWM → PersonaParams [5]
-│   ├── inner-voice.ts            ← 内心独白: 触发+LLM调用 [9]
-│   └── memory-inner.ts           ← 隐形记忆读写
+D:/NanAgi/
 │
-├── agent/                        ← 🆕 Agent 机械层 (V2.6)
-│   ├── types.ts, registry.ts
-│   ├── loop.ts                   ← ReAct 循环 + 三层容灾
-│   ├── prompts.ts                ← System Prompt 六段式拼接
-│   └── tools/                    ← 9个工具
+├── README.md                       ← 本文档 (完整架构设计)
 │
-├── app/api/chat/route.ts         ← 薄层 handler
+├── src/
+│   ├── personality/                ← 🆕 数字人格层 (V2.7-2.8)
+│   │   ├── types.ts                ← SelfNode [15], IWMNode [1][3],
+│   │   │                              EmotionState [6][7], AmbientContext,
+│   │   │                              PersonaParameters [5], SocialPlan [11],
+│   │   │                              ExternalSignals, EmotionDelta,
+│   │   │                              GraphState, Edge,
+│   │   │                              FeedbackRecord, CellRecord
+│   │   │
+│   │   ├── configs/
+│   │   │   ├── self.ts             ← Self-Node 7 traits 锚点 + K=0.05
+│   │   │   ├── guest-iv.ts          ← 面试官: 情绪钳制[0.3,0.7] +
+│   │   │   │                          IWM基线 + 预设4目标 + Gross偏好
+│   │   │   ├── guest.ts            ← 普通用户: 同上, 无反馈
+│   │   │   └── admin.ts            ← 主人: 情绪[0,1] + 0义务 +
+│   │   │                              情境选择可用 + 称呼"主人"
+│   │   │
+│   │   ├── graph.ts                ← 社交图: 节点CRUD + 边权重 [19] +
+│   │   │                              Message Passing (仅admin) +
+│   │   │                              Heider 传播 [4]
+│   │   ├── emotion.ts              ← OCC 评价 [8] + 双弹簧拉回 [10] +
+│   │   │                              通道钳制 [12]
+│   │   ├── ambient-context.ts      ← 时间·地点·天气 → ambientMood [6][7]
+│   │   ├── signals.ts              ← 外部信号提取 (情感词典/句法/
+│   │   │                              提及检测/归因判断)
+│   │   ├── planning.ts             ← SIP 六步 [11] + Gross 策略池 [12]
+│   │   ├── filter.ts               ← 人格过滤: emotion + IWM →
+│   │   │                              PersonaParameters [5]
+│   │   ├── inner-voice.ts          ← 内心独白: 触发条件 [9] +
+│   │   │                              独立 LLM 调用 (max_tokens=200)
+│   │   ├── memory-inner.ts         ← 隐形记忆读写 (data/self/inner/)
+│   │   └── iwm-init.ts             ← 🆕 注册表单 → IWM Node 初始化
+│   │
+│   ├── agent/                      ← 🆕 Agent 机械层 (V2.6)
+│   │   ├── types.ts                ← AgentMessage, ToolCall, ToolResult,
+│   │   │                              AgentContext, LoopState, ResilienceConfig
+│   │   ├── registry.ts             ← ToolRegistry { register, get, list, execute }
+│   │   ├── loop.ts                 ← ReAct 循环 (5轮+hash循环检测) +
+│   │   │                              三层容灾 (30s超时→重试→降级)
+│   │   ├── prompts.ts              ← System Prompt 七段式拼接:
+│   │   │                              [0]环境 [1]角色 [2]关系感知(IWM)
+│   │   │                              [3]人格注入 [4]上次对话 [5]记忆
+│   │   │                              [6]工具层 [7]行为准则
+│   │   └── tools/
+│   │       ├── index.ts            ← 注册所有工具
+│   │       ├── get-time.ts         ← 本地 Date, 零依赖
+│   │       ├── get-weather.ts      ← 和风天气 API
+│   │       ├── search-web.ts       ← Bing/SerpAPI
+│   │       ├── search-memory.ts    ← 显性记忆检索
+│   │       ├── save-memory.ts      ← 记忆创建
+│   │       ├── generate-image.ts   ← 混元生图 (重构自 route.ts)
+│   │       ├── navigate-project.ts ← 项目导航 (重构自 route.ts)
+│   │       ├── get-project-info.ts ← 项目信息查询
+│   │       ├── search-guests.ts    ← 🆕 列出最近访客 (仅 admin)
+│   │       └── get-feedback.ts     ← 🆕 查看面试反馈 (仅 admin)
+│   │
+│   ├── lib/
+│   │   ├── store.ts                ← 🆕 统一数据访问层
+│   │   │                              (内部路由: admin→fs, guest→LevelDB)
+│   │   ├── auth.ts                 ← 鉴权 (bcrypt + JWT + personId)
+│   │   ├── memory.ts               ← 显性记忆 CRUD (现有, 保留)
+│   │   ├── hunyuan.ts              ← 混元 API 客户端 (现有)
+│   │   ├── projects.ts             ← 项目元数据 (现有)
+│   │   └── types.ts                ← SSE 事件 + Message + JukeboxState
+│   │                                  (现有, 精简)
+│   │
+│   ├── app/api/
+│   │   ├── auth/
+│   │   │   ├── route.ts            ← 🔧 登录 (改造: personId + password)
+│   │   │   └── register/
+│   │   │       └── route.ts        ← 🆕 注册 (表单 → init IWM → JWT)
+│   │   └── chat/
+│   │       └── route.ts            ← 🔧 重构: 644行 → ~80行 thin handler
+│   │                                  (读JWT→构建AgentContext→调agentLoop)
+│   │
+│   ├── middleware.ts               ← 🔧 注入 x-nanagi-role + x-nanagi-person-id
+│   ├── contexts/ChatContext.tsx      ← 🔧 Cell 管理 (cell 列表 + 切换)
+│   ├── components/
+│   │   ├── AuthForm.tsx             ← 🆕 引导式注册/登录表单
+│   │   ├── CellList.tsx             ← 🆕 左侧 cell 列表
+│   │   ├── AgentDialog.tsx         ← 聊天界面 (现有)
+│   │   ├── ChatMessage.tsx         ← 消息气泡 (现有)
+│   │   ├── MemoryPanel.tsx         ← 记忆面板 (现有, 加"内心"tab)
+│   │   └── ...                     ← 其他现有组件
+│   │
+│   └── app/globals.css             ← 三风格设计系统 (现有)
 │
-data/
-├── inner/                        ← 🆕 隐形记忆 + Self-Node
-│   ├── self-node.json
-│   ├── emotion-state.json
-│   ├── emotion-log.jsonl
-│   └── inner-{ts}.md
-├── graph/                        ← 🆕 社交图节点
-│   ├── nanzhijin.json
-│   ├── claude.json
-│   ├── guest-{fp}.json
-│   └── graph-log.jsonl
-└── memory/                       ← 显性记忆 (现有)
-    ├── MEMORY.md
-    └── mem-{ts}.md
+├── data/
+│   ├── self/                       ← 🦊 NaNaGi 本体 (文件系统)
+│   │   ├── self-node.json
+│   │   ├── emotion-state.json
+│   │   ├── emotion-log.jsonl
+│   │   └── inner/
+│   │       └── inner-{ts}.md
+│   │
+│   ├── admin/                      ← 👑 南志锦专属 (文件系统)
+│   │   ├── nanzhijin.json
+│   │   ├── nanzhijin-iwm.json
+│   │   └── memories/
+│   │       ├── MEMORY.md
+│   │       └── mem-{ts}.md
+│   │
+│   ├── leveldb/                    ← 🌐 所有 guest (LevelDB)
+│   │   ├── user:{personId}
+│   │   ├── iwm:{personId}
+│   │   ├── mem:{personId}:{ts}
+│   │   ├── emo:{personId}:{ts}
+│   │   ├── conv:{personId}:{cellId}
+│   │   └── feedback:{personId}    ← 仅 guest-iv
+│   │
+│   └── memory/                     ← 显性记忆 (现有, V2.5)
+│       ├── MEMORY.md
+│       └── mem-{ts}.md
+│
+├── package.json
+├── tsconfig.json
+├── next.config.ts
+├── tailwind.config.ts
+├── Dockerfile
+├── .env.example
+└── .env.local (不提交)
 ```
 
 ---
@@ -584,12 +1194,14 @@ data/
 |------|------|
 | 前端框架 | Next.js 16 + TypeScript + React 19 |
 | 样式 | Tailwind CSS 4 + 像素风三风格设计系统 |
-| AI 引擎 | DeepSeek V4 Pro（Anthropic 兼容端点） |
-| 鉴权 | bcryptjs + jose (JWT) + 双角色 |
+| AI 引擎 | DeepSeek V4 Pro (Anthropic 兼容端点) |
+| 鉴权 | bcryptjs + jose (JWT, personId + role) |
 | 生图 | 腾讯混元 hy-image-v3.0 |
-| 天气 | 和风天气 API + geoip-lite (IP→地点) |
-| 记忆存储 | 文件系统 (YAML frontmatter + Markdown) |
-| 记忆哲学 | 文件系统 > 数据库 (可审计、可手动编辑) |
+| 天气 + 地理 | 和风天气 API + geoip-lite (MaxMind GeoLite2) |
+| 用户 IWM 存储 | LevelDB (classic-level, 嵌入式 K-V, MIT, O(1)) |
+| 娜娜吉本体存储 | 文件系统 (JSON + Markdown, sub-ms, 可审计) |
+| 显性记忆存储 | admin: 文件系统 / guest: LevelDB |
+| 向量检索 (P2) | LanceDB (嵌入式, 零部署) |
 | 部署 | Docker → 腾讯云 Lighthouse 2C4G 5M |
 
 ---
@@ -602,11 +1214,10 @@ cp .env.example .env.local  # 填入 API Key
 npm run dev                  # http://localhost:3000
 ```
 
-## 环境变量
+### 环境变量
 
 | 变量 | 说明 |
 |------|------|
-| `NANAGI_PASSWORD_HASH` | 面试官密码 bcrypt hash |
 | `NANAGI_ADMIN_PASSWORD_HASH` | 管理员密码 bcrypt hash |
 | `DEEPSEEK_API_KEY` | DeepSeek API Key |
 | `HUNYUAN_API_KEY` | 混元生图 API Key |
@@ -616,9 +1227,15 @@ npm run dev                  # http://localhost:3000
 
 ## 面试话术
 
-> "NaNaGi 不是工具型 Agent，是关系型 Agent [1]。核心架构是一个社交图——基于 Bowlby 内部工作模型 [1][2][3]，每个经常对话的人在她心中有一个独立的 IWM 节点，有6个维度、有弹性系数 [10]、随对话更新。同一个锚定人格，在不同社交情境中表现出不同的行为 [5]——面试官看到专业女仆，主人看到真实的小狐仙。
+> "NaNaGi 不是工具型 Agent，是关系型 Agent [1]。核心架构是一个社交图——基于 Bowlby 内部工作模型 [1][2][3]，每个人在她心中有一个独立的 IWM 节点，6 个维度，弹性系数随关系深度变化 [10]。同一个锚定人格 (Self-Node) [15] 在不同社交情境中 (Jung 人格面具 [5]) 表现出不同的行为——面试官看到专业女仆，主人看到真实自我。
 >
-> 情绪不是 prompt 里的形容词，是独立的 OCC 评价引擎 [8]——外部信号驱动、规则引擎计算、不经 LLM 手、每一笔变化都有 audit log。高通路 [9] 在关键时刻触发内心独白，但不替她决定情绪。当主人提到第三者时，图上的 Message Passing 机制（Heider 平衡理论 [4]）会自动更新第三者的节点。
+> 情绪不是 prompt 里的形容词，是独立的 OCC 评价引擎 [8]——外部信号驱动、规则引擎计算、不经 LLM 手、每一笔变化都有 audit log。高通路 [9] 在关键时刻触发内心独白，但不替她决定情绪。双弹簧拉回 [10] 确保情绪的弹性——不会因为一次对话就彻底改变。
+>
+> 存储架构是三层的——NaNaGi 本体用文件系统 (可审计、可 cat)，主人数据用文件系统 (可编辑)，所有 guest 用户数据走 LevelDB (O(1)、事务安全、百万级验证)。admin 和 guest 的 IWM Schema 完全一致——只有存储位置不同。
+>
+> Cell 隔离记忆架构确保上下文不膨胀——每个对话 Cell 是独立的上下文容器，IWM、显性记忆、面试反馈跨 Cell 累积，但其他 Cell 的完整聊天历史不进当前上下文。
+>
+> 两个图各自独立——Admin 通道的个人关系图用 Heider 平衡 [4] 维护熟人网络；Guest 通道的面试反馈图结构化记录面试官对南志锦的评价和需求，主人可事后查询。
 >
 > 这跟我做的 GNN 社交图谱链接预测是同一套数学框架 [19]——Node Embedding、Edge Weight、Message Passing、Cold Start。”
 
