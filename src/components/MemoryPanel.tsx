@@ -19,6 +19,7 @@ interface MemoryBrief {
     projectSlug?: string;
     createdAt?: string;
   };
+  content?: string;
   updatedAt: string;
 }
 
@@ -44,32 +45,33 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export default function MemoryPanel() {
-  const { isAuthenticated, userRole, memoryVersion } = useChat();
-  const [open, setOpen] = useState(false);
+  const { isAuthenticated, userRole, memoryVersion, openPanel, setOpenPanel } = useChat();
+  const open = openPanel === "memory";
   const [memories, setMemories] = useState<MemoryBrief[]>([]);
   const [selected, setSelected] = useState<MemoryDetail | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // 加载记忆列表
-  const loadMemories = useCallback(async () => {
-    try {
-      const res = await fetch("/api/memory");
-      if (res.ok) {
-        const data = await res.json();
-        setMemories(data);
-      }
-    } catch (err) {
-      console.error("[MemoryPanel] 加载失败:", err);
-    }
-  }, []);
-
   // 面板打开时 + memoryVersion 变化时自动刷新
   useEffect(() => {
-    if (open && isAuthenticated) loadMemories();
-  }, [open, isAuthenticated, memoryVersion, loadMemories]);
+    let cancelled = false;
+    if (open && isAuthenticated) {
+      fetch("/api/memory")
+        .then((r) => r.json())
+        .then((data) => { if (!cancelled) setMemories(Array.isArray(data) ? data : []); })
+        .catch((err) => { console.error("[MemoryPanel] 加载失败:", err); });
+    }
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, isAuthenticated, memoryVersion]);
 
-  // 打开详情
+  // 打开详情 — guest 用列表已有的数据, admin 取完整内容
   const openDetail = useCallback(async (slug: string) => {
+    // guest: 从已加载的列表中找到该记忆
+    if (userRole !== "admin") {
+      const item = memories.find((m) => m.slug === slug);
+      if (item) setSelected({ ...item, content: item.content || "" });
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`/api/memory/${slug}`);
@@ -79,12 +81,12 @@ export default function MemoryPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userRole, memories]);
 
   // 删除（仅管理员）
   const handleDelete = useCallback(
     async (slug: string) => {
-      if (userRole !== "admin") return;
+      if (!userRole) return;
       if (!confirm("确定删除这条记忆吗？")) return;
       try {
         const res = await fetch(`/api/memory/${slug}`, { method: "DELETE" });
@@ -105,7 +107,7 @@ export default function MemoryPanel() {
     <>
       {/* 切换按钮 — 左侧屏幕边缘 */}
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpenPanel(open ? null : "memory")}
         className={`memory-toggle ${open ? "memory-toggle-open" : ""}`}
         title={open ? "收起记忆库" : "打开记忆库"}
       >
@@ -117,7 +119,7 @@ export default function MemoryPanel() {
 
       {/* 滑出面板 + 遮罩 */}
       {open && (
-        <div className="memory-backdrop" onClick={() => setOpen(false)} />
+        <div className="memory-backdrop" onClick={() => setOpenPanel(null)} />
       )}
 
       <div className={`memory-panel ${open ? "memory-panel-open" : ""}`}>
@@ -130,7 +132,7 @@ export default function MemoryPanel() {
               {memories.length} 条记忆
             </span>
             <button
-              onClick={() => setOpen(false)}
+              onClick={() => setOpenPanel(null)}
               className="text-sm opacity-60 hover:opacity-100"
             >
               ✕
@@ -173,7 +175,7 @@ export default function MemoryPanel() {
                   </span>
                 </div>
               </div>
-              {userRole === "admin" && (
+              {userRole && (
                 <button
                   className="memory-card-delete"
                   onClick={(e) => {
@@ -218,7 +220,7 @@ export default function MemoryPanel() {
                       </h3>
                     </div>
                     <div className="memory-detail-actions">
-                      {userRole === "admin" && (
+                      {userRole && (
                         <button
                           className="pixel-btn text-xs"
                           onClick={() => handleDelete(selected.slug)}

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChat } from "@/contexts/ChatContext";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import AuthForm from "./AuthForm";
+import CellList from "./CellList";
 
 // Full-screen central dialog for the home page
 export default function AgentDialog() {
@@ -17,6 +18,13 @@ export default function AgentDialog() {
     loginLoading,
     login,
     sendMessage,
+    cells,
+    currentCellId,
+    switchCell,
+    createCell,
+    deleteCell,
+    renameCell,
+    pinCell,
   } = useChat();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -80,12 +88,22 @@ export default function AgentDialog() {
 
   // —— Authenticated: full chat ——
   return (
-    <div
-      className="w-full max-w-2xl mx-4 flex flex-col"
-      style={{ height: "calc(100vh - 4rem)" }}
-    >
-      {/* Header */}
-      <div className="pixel-border-light bg-cream-card px-4 py-2 mb-3 flex items-center justify-between">
+    <div className="w-full max-w-4xl mx-4 flex gap-3" style={{ height: "calc(100vh - 4rem)" }}>
+      {/* 左侧 Cell 列表 — 滑出面板 (跟 MemoryPanel 同模式) */}
+      <CellList
+        cells={cells}
+        currentCellId={currentCellId}
+        onSelect={switchCell}
+        onNew={createCell}
+        onDelete={deleteCell}
+        onRename={renameCell}
+        onPin={pinCell}
+      />
+
+      {/* 右侧聊天区 */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="pixel-border-light bg-cream-card px-4 py-2 mb-3 flex items-center justify-between">
         <span className="text-xs font-bold tracking-wider">◆ NaNaGi 在线</span>
         <span className="text-xs text-ink-muted">
           {streaming ? "回复中..." : "就绪"}
@@ -142,6 +160,7 @@ export default function AgentDialog() {
           Enter 发送 · NaNaGi
         </p>
       </div>
+      </div> {/* close right chat area */}
     </div>
   );
 }

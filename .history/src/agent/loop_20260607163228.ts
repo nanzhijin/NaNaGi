@@ -80,7 +80,7 @@ async function parseStreamResponse(response: Response): Promise<LLMResponse> {
   let buffer = "";
   let textContent = "";
   let toolUseBlock: { id: string; name: string; input: string } | null = null;
-  const toolCalls: ToolCall[] = [];
+  let toolCalls: ToolCall[] = [];
 
   while (true) {
     const { done, value } = await reader.read();

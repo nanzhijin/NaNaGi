@@ -21,6 +21,15 @@ const STORAGE_KEY = "nanagi_chat";
 
 // —— Types ——
 
+interface CellInfo {
+  cellId: string;
+  title: string;
+  pinned?: boolean;
+  createdAt: string;
+  lastMessageAt: string;
+  messageCount: number;
+}
+
 interface ChatContextType {
   // Auth
   isAuthenticated: boolean;
@@ -46,6 +55,19 @@ interface ChatContextType {
 
   // Memory panel auto-refresh
   memoryVersion: number;
+
+  // P4: Cell
+  cells: CellInfo[];
+  currentCellId: string | null;
+  switchCell: (cellId: string) => Promise<void>;
+  createCell: () => Promise<void>;
+  deleteCell: (cellId: string) => Promise<void>;
+  renameCell: (cellId: string, title: string) => Promise<void>;
+  pinCell: (cellId: string, pinned: boolean) => Promise<void>;
+
+  // 面板互斥
+  openPanel: "memory" | "cell" | null;
+  setOpenPanel: (panel: "memory" | "cell" | null) => void;
 }
 
 const WELCOME_MESSAGE: Message = {
@@ -93,6 +115,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   // Memory panel auto-refresh
   const [memoryVersion, setMemoryVersion] = useState(0);
+
+  // P4: Cell 管理
+  const [cells, setCells] = useState<CellInfo[]>([]);
+  const [currentCellId, setCurrentCellId] = useState<string | null>(null);
+
+  // 面板互斥
+  const [openPanel, setOpenPanel] = useState<"memory" | "cell" | null>(null);
 
   // Keep ref in sync
   useEffect(() => {
@@ -294,7 +323,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             messages: apiMessages,
-            project: projectSlug, // V2: 传递当前项目上下文
+            project: projectSlug,
+            cellId: currentCellId, // P4: 传递当前 Cell ID
           }),
           signal: abortController.signal,
         });
@@ -371,10 +401,107 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       } finally {
         setStreaming(false);
         streamAbortRef.current = null;
+
+        // Cell 消息由服务端 route.ts 自动保存 — 无需前端处理
       }
     },
-    [streaming, projectSlug]
+    [streaming, projectSlug, currentCellId]
   );
+
+  // —— P4: Cell 管理 ——
+
+  const loadCells = useCallback(async () => {
+    try {
+      const res = await fetch("/api/cells");
+      if (res.ok) {
+        const data = await res.json();
+        setCells(data);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const createCell = useCallback(async () => {
+    try {
+      const res = await fetch("/api/cells", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "新对话" }),
+      });
+      if (res.ok) {
+        const cell = await res.json();
+        setCells((prev) => [cell, ...prev]);
+        setCurrentCellId(cell.cellId);
+        setMessages([]);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const switchCell = useCallback(async (cellId: string) => {
+    setCurrentCellId(cellId);
+    // 从 Cell 加载已有消息
+    try {
+      const res = await fetch(`/api/cells/${cellId}/messages`);
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages || []);
+      } else {
+        setMessages([]);
+      }
+    } catch {
+      setMessages([]);
+    }
+  }, []);
+
+  // 登录后加载 Cell 列表 + 打开最近 Cell
+  const authInitDone = useRef(false);
+  useEffect(() => {
+    if (isAuthenticated && !authInitDone.current) {
+      authInitDone.current = true;
+      (async () => {
+        const res = await fetch("/api/cells").catch(() => null);
+        if (!res?.ok) return;
+        const cellList: CellInfo[] = await res.json();
+        setCells(cellList);
+        if (cellList.length > 0) {
+          setCurrentCellId(cellList[0].cellId);
+          const msgRes = await fetch(`/api/cells/${cellList[0].cellId}/messages`).catch(() => null);
+          if (msgRes?.ok) {
+            const data = await msgRes.json();
+            setMessages((data.messages || []).map((m: { id: string; role: string; content: string }) => ({
+              id: m.id, role: m.role as "agent" | "user", content: m.content,
+            })));
+          }
+        }
+      })();
+    }
+  }, [isAuthenticated]);
+
+  const deleteCell = useCallback(async (cellId: string) => {
+    await fetch(`/api/cells/${cellId}`, { method: "DELETE" }).catch(() => {});
+    setCells((prev) => prev.filter((c) => c.cellId !== cellId));
+    if (currentCellId === cellId) {
+      setCurrentCellId(null);
+      setMessages([]);
+    }
+  }, [currentCellId]);
+
+  const pinCell = useCallback(async (cellId: string, pinned: boolean) => {
+    await fetch(`/api/cells/${cellId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    }).catch(() => {});
+    setCells((prev) => prev.map((c) => c.cellId === cellId ? { ...c, pinned } as CellInfo : c));
+  }, []);
+
+  const renameCell = useCallback(async (cellId: string, title: string) => {
+    await fetch(`/api/cells/${cellId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    }).catch(() => {});
+    setCells((prev) => prev.map((c) => c.cellId === cellId ? { ...c, title } : c));
+  }, []);
 
   const clearModelResult = useCallback(() => {
     setModelResult(null);
@@ -399,6 +526,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         projectSlug,
         setProjectSlug,
         memoryVersion,
+        cells,
+        currentCellId,
+        switchCell,
+        createCell,
+        deleteCell,
+        renameCell,
+        pinCell,
+        openPanel,
+        setOpenPanel,
       }}
     >
       {children}

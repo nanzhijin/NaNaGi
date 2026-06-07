@@ -205,6 +205,7 @@ export interface CellRecord {
   cellId: string;
   personId: string;
   title: string;
+  pinned?: boolean;
   createdAt: string;
   lastMessageAt: string;
   messageCount: number;

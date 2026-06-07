@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     const brief = memories.map(({ slug, meta, content }) => ({
       slug,
       meta,
-      content: content?.slice(0, 300) || "", // guest 只给 300 字预览
+      content: content || "",
       personId: "personId" in meta ? (meta as Record<string,unknown>).personId : undefined,
     }));
     return NextResponse.json(brief);

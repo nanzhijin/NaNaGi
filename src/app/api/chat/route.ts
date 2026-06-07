@@ -11,7 +11,8 @@ import { guestConfig } from "@/personality/configs/guest";
 import { adminConfig } from "@/personality/configs/admin";
 import { getAmbient } from "@/lib/ambient";
 import { listMemories, createMemory, type MemoryType } from "@/lib/memory";
-import { getNode, putNode, createMemory as storeCreateMemory } from "@/lib/store";
+import { getNode, putNode, createMemory as storeCreateMemory, getCell, putCell } from "@/lib/store";
+import type { CellRecord } from "@/lib/leveldb";
 import type { MemoryRecord, IWMNode } from "@/lib/leveldb";
 import type { AgentContext, AgentMessage } from "@/agent/types";
 
@@ -103,7 +104,8 @@ export async function POST(request: NextRequest) {
 
   // 3. 构建 AgentContext
   const body = await request.json().catch(() => ({}));
-  const { messages = [], project } = body;
+  const { messages = [], project, cellId } = body;
+  console.log("[Chat] cellId:", cellId, "personId:", personId);
 
   const memoryContext = await buildMemoryContext(personId, role);
 
@@ -135,12 +137,39 @@ export async function POST(request: NextRequest) {
   const shouldMemorize =
     lastUserMsg && checkMemoryTrigger(lastUserMsg.content);
 
-  // 6. 启动 Agent Loop → SSE stream
+  // 6. 存用户消息到 Cell (ChatGPT 模式: 服务端自动保存)
+  if (cellId) {
+    try {
+      const cell = await getCell(personId, cellId);
+      if (!cell) {
+        console.warn("[Cell] Cell不存在, 跳过保存用户消息:", cellId);
+      } else {
+        const msg = {
+          id: `user-${Date.now()}`,
+          role: "user" as const,
+          content: agentMessages.filter((m) => m.role === "user").pop()?.content || "",
+          timestamp: new Date().toISOString(),
+        };
+        cell.messages.push(msg);
+        cell.messageCount = cell.messages.length;
+        cell.lastMessageAt = msg.timestamp;
+        await putCell(cell);
+        console.log("[Cell] ✅ 用户消息已保存:", msg.content.slice(0, 50));
+      }
+    } catch (err) {
+      console.error("[Cell] ❌ 保存用户消息失败:", err);
+    }
+  } else {
+    console.warn("[Cell] ⚠️ cellId 为空, 跳过保存");
+  }
+
+  // 7. 启动 Agent Loop → SSE stream
   const encoder = new TextEncoder();
+  let finalMessages: AgentMessage[] = [];
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        await agentLoop(controller, ctx, agentMessages);
+        finalMessages = await agentLoop(controller, ctx, agentMessages);
       } catch (err) {
         console.error("[Chat] Agent loop error:", err);
         const fallback =
@@ -155,6 +184,35 @@ export async function POST(request: NextRequest) {
       }
 
       // ==================== Step 10: 后处理 ====================
+
+      // —— 存 NaNaGi 回复到 Cell ——
+      if (cellId && finalMessages.length > 0) {
+        try {
+          const cell = await getCell(personId, cellId);
+          if (!cell) {
+            console.warn("[Cell] Cell不存在, 跳过保存回复:", cellId);
+          } else {
+            const text = finalMessages
+              .filter((m) => m.role === "assistant" && m.content)
+              .map((m) => m.content)
+              .join("\n");
+            if (text) {
+              cell.messages.push({
+                id: `agent-${Date.now()}`,
+                role: "agent" as const,
+                content: text,
+                timestamp: new Date().toISOString(),
+              });
+              cell.messageCount = cell.messages.length;
+              cell.lastMessageAt = new Date().toISOString();
+              await putCell(cell);
+              console.log("[Cell] ✅ 回复已保存:", text.slice(0, 50));
+            }
+          }
+        } catch (err) {
+          console.error("[Cell] ❌ 保存回复失败:", err);
+        }
+      }
 
       // —— IWM Node 持久化 ——
       try {
