@@ -11,6 +11,8 @@ import { guestConfig } from "@/personality/configs/guest";
 import { adminConfig } from "@/personality/configs/admin";
 import { getAmbient } from "@/lib/ambient";
 import { listMemories, createMemory, type MemoryType } from "@/lib/memory";
+import { getNode, putNode, createMemory as storeCreateMemory } from "@/lib/store";
+import type { MemoryRecord, IWMNode } from "@/lib/leveldb";
 import type { AgentContext, AgentMessage } from "@/agent/types";
 
 // 动态导入工具 — 触发 registerTool()
@@ -83,7 +85,7 @@ export async function POST(request: NextRequest) {
   if (!valid) return new Response("Token expired", { status: 401 });
 
   // P3: personId + name + identity 从 JWT 中提取
-  const personId = request.headers.get("x-nanagi-person-id") || role;
+  const personId = role === "admin" ? "nanzhijin" : (request.headers.get("x-nanagi-person-id") || "guest");
   const name = role === "admin" ? "南志锦" : "客人";
   const identity = role === "admin" ? "主人" : "面试官";
 
@@ -143,20 +145,59 @@ export async function POST(request: NextRequest) {
         controller.close();
       }
 
-      // 框架层记忆拦截: 流结束后写入
-      // (简化版 — P2 接入 store.ts 完善)
+      // ==================== Step 10: 后处理 ====================
+
+      // —— IWM Node 持久化 ——
+      try {
+        let iwmNode = await getNode(personId);
+        if (!iwmNode) {
+          // 首次接触 → 初始化节点
+          const isAdmin = personId === "nanzhijin";
+          iwmNode = {
+            personId, name, role: role as IWMNode["role"], identity,
+            traits: isAdmin
+              ? { safety: 0.85, intimacy: 0.50, care: 0.80, respect: 0.75, reliability: 0.70, understanding: 0.55 }
+              : { safety: 0.5, intimacy: 0.1, care: 0.5, respect: 0.5, reliability: 0.5, understanding: 0.3 },
+            knownFacts: [],
+            topicInterests: [],
+            firstMet: new Date().toISOString(), lastTalk: new Date().toISOString(),
+            totalTurns: 0, historyDensity: 0.0,
+          };
+          console.log("[Store] 初始化 IWM Node:", personId, isAdmin ? "(admin基线)" : "(guest基线)");
+        }
+        iwmNode.totalTurns++;
+        iwmNode.lastTalk = new Date().toISOString();
+        iwmNode.historyDensity = Math.min(1.0, iwmNode.totalTurns / 100);
+        await putNode(iwmNode);
+      } catch (err) {
+        console.error("[Store] IWM 持久化失败:", err);
+      }
+
+      // —— 框架层记忆拦截 (统一走 store) ——
       if (shouldMemorize && lastUserMsg) {
         try {
           const desc = extractMemoryDesc(lastUserMsg.content);
           const memType = resolveMemoryType(lastUserMsg.content);
           const slug = `mem-${Date.now()}`;
-          await createMemory(
-            { name: slug, description: desc, type: memType },
-            `## 用户消息\n${lastUserMsg.content}\n\n## 对话摘要\n记忆触发词已记录`
-          );
-          console.log("[Memory] 框架自动记忆:", desc);
+          const ts = new Date().toISOString();
+
+          await storeCreateMemory({
+            slug,
+            personId,
+            meta: {
+              name: slug,
+              description: desc,
+              type: memType,
+              tags: [],
+              createdAt: ts,
+            },
+            content: `## 用户消息\n${lastUserMsg.content}\n\n## 对话摘要\n记忆触发词已记录`,
+            summary: desc,
+            keywords: [],
+          });
+          console.log("[Store] 记忆已保存:", desc, personId === "nanzhijin" ? "(fs)" : "(LevelDB)");
         } catch (err) {
-          console.error("[Memory] 自动记忆失败:", err);
+          console.error("[Store] 记忆保存失败:", err);
         }
       }
     },
