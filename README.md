@@ -663,3 +663,20 @@ npm run dev                  # http://localhost:3000
 ---
 
 > 📋 **旧版 README**：[旧README.md](./旧README.md) — 含 v5.1 详细任务列表、18 Bug 记录、Block×P 历史存档
+
+---
+
+## 📝 备忘录
+
+> 未纳入正式实施计划的事项，记录以备后用
+
+### Hermes 模型 — 开源 Function Calling 候选
+
+**来源**：[NousResearch / Hermes](https://huggingface.co/NousResearch)，基于 Llama 微调的开源模型系列，专攻 Tool Use / Function Calling。
+
+**待评估**：
+- Hermes Function Calling Dataset — 可从 API 文档自动合成 tool schema + 调用示例，用于 NaNaGi worker 面具工具扩展（paper-search / textbook-query / quality-score 等）
+- 并行工具调用 — Hermes 支持单轮多个 tool_call 并发执行，当前 NaNaGi `agentLoop` 为串行。P5-D 可评估引入
+- 本地部署 — 通过 Ollama 运行，降低 worker 面具的 API 依赖
+
+**状态**：📋 待 P7 worker 工具集阶段评估。当前 DeepSeek V4 Pro Anthropic 端点的 tool_use 能力已满足 P1-P5 需求，不阻塞主线。
