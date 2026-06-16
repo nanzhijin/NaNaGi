@@ -377,13 +377,15 @@ NaNaGi 的数字人格由四个子系统构成：一个**社交图**提供稳定
 ```
 外部输入 (用户消息 · 时间 · 天气 · IP)
    │
-   ├──→ signals.ts ─────────────── ToM (P13)
-   │     │                          推断他人心理状态
+   ├──→ signals.ts ─────────────── ToM / Premack (P13)
+   │     │                          🆕 P5-C: → Flavell元认知 + Wellman BDI
+   │     │                          推断他人心理状态 → 多假设 + confidence
    │     ▼
    ├──→ ambient-context.ts ─────── PAD (P5) + Plutchik (P6)
    │     │                          环境→情绪基线, 6维偏移
    │     ▼
    ├──→ emotion.ts ─────────────── OCC (P7) + LeDoux (P8) + McEwen (P9)
+   │     │                          🆕 P5-C: OCC → CPM 5维 (Scherer 1993-2009)
    │     │                          低通路: 规则引擎  |  高通路: inner-voice.ts
    │     │                          双弹簧拉回: Self K=0.05 / IWM K=adaptive
    │     ▼
@@ -409,24 +411,30 @@ NaNaGi 的数字人格由四个子系统构成：一个**社交图**提供稳定
 ```
 
 ### 3.2 精确映射表
-|---|-----------|----------|------------|---------|
-| 1 | **Bowlby** 依恋理论 | 1969, 1973 | `personality/graph.ts` — IWM Node 结构 | IWM Node 6 维度 (safety/intimacy/care/respect/reliability/understanding) 直接映射 Bowlby 内部工作模型。弹簧拉回动力学来自安全基地的"重复敏感性照料"逐渐建立理论 |
-| 2 | **Bretherton & Munholland** IWM 细化 | 2008 | `personality/graph.ts` — IWM 作为图节点 | IWM 是层级化、多维度的表征结构——非单一"好/坏"评价，而是 6 个独立维度的动态平衡 |
-| 3 | **Heider** 平衡理论 | 1958 | `personality/graph.ts` — 图消息传递 | P–O–X 三元平衡。admin 提到某人 → Heider 平衡传播 → 被提及者 IWM Node 更新。**仅 admin 通道触发**，guest 不做传播 |
-| 4 | **Jung** 人格面具 | 1943/1953 | `personality/persona.ts` — PersonaMask | 同一自我在不同社交情境呈现不同面向。companion(小女儿) vs worker(大女儿) — 同一 Self-Node，不同表达偏置 |
-| 5 | **Mehrabian & Russell** PAD 情绪模型 | 1974 | `personality/ambient-context.ts` — 环境基线 | 物理环境（光照、温度、空间）直接影响情绪三维度。AmbientContext 产生 ambientMood 6 维偏移，作为情绪基线 |
-| 6 | **Plutchik** 情绪轮 | 1980 | `personality/types.ts` — 情绪维度选择 | intimacy/pride/calmness 三个额外维度的理论来源，与 PAD 的 pleasure/arousal/dominance 形成互补的 6 维空间 |
-| 7 | **OCC** 情绪认知评价 | 1988 | `personality/emotion.ts` — OCC 引擎 | 情绪源于对事件的三维认知评价：目标相关性 × 期望一致性 × 因果归因 → EmotionDelta。**规则引擎，不经 LLM** |
-| 8 | **LeDoux** 双通路情绪 | 1996 | `personality/emotion.ts` + `inner-voice.ts` | 低通路(杏仁核, <20ms) = OCC 规则引擎；高通路(皮层, 300-500ms) = 内心独白 LLM 调用。\|Δemotion\| > 0.15 → 触发高通路 |
-| 9 | **McEwen & Stellar** Allostatic Load | 1993 | `personality/emotion.ts` — 双弹簧拉回 | 生物系统通过改变设定点适应长期压力。Self K=0.05 (极慢演化，性格硬件)；IWM K=adaptive (关系弹性) |
-| 10 | **Crick & Dodge** SIP 六步 | 1994 | `personality/planning.ts` — 社交规划 | 编码→解释→澄清目标→生成策略→评估→执行。guest 4 预设目标，admin 0 义务(涌现) |
-| 11 | **Gross** 情绪调节策略 | 1998 | `personality/planning.ts` — 策略池 | 5 策略：情境选择/修正/注意分配/认知重评/反应调节。SIP Step 4 策略生成池 + 通道差异 (guest 情绪钳制) |
-| 12 | **ToM** 心理理论 | 1978 | `personality/signals.ts` — 信号提取 | 推断他人心理状态。SIP Step 2 (解释线索) + IWM understanding 维度的认知基础。**确定性规则引擎** |
-| 13 | **SDT** 自我决定理论 | 2000 | `personality/configs/` — admin 通道设计 | 自主性/胜任感/关联性三大基本心理需求。admin 通道 0 义务设计 → 自主性；IWM 关系维度 → 关联性 |
-| 14 | **Young** 图式疗法 | 2003 | `personality/types.ts` — Self-Node 定义 | 早期形成的核心人格结构稳定且难以改变。Self-Node 作为"性格硬件"，K=0.05 极慢演化 |
-| 15 | **Klein** 内在客体 | 1946, 1957 | `personality/graph.ts` — IWM 表征本质 | IWM Node 是 representation-not-reality。care/respect 维度的精神分析基础 |
-| 16 | **Winnicott** 促进性环境 | 1965 | `personality/graph.ts` — IWM 维度来源 | 健康的心理发展需要"足够好的照料"。IWM safety/intimacy 维度的来源 |
-| 17 | **GraphSAGE** 图神经网络 | 2017 | `personality/graph.ts` — 消息传递 | 归纳式图节点嵌入。社交图的 Message Passing 与节点更新的数学对应。与南志锦的 GNN 社交图谱链接预测项目形成学术对称 |
+
+| # | 心理学模型 | 论文/年份 | NaNaGi 模块 | 状态 | 设计依据 |
+|---|-----------|----------|------------|------|---------|
+| 1 | **Bowlby** 依恋理论 | 1969, 1973 | `personality/graph.ts` — IWM Node 结构 | ✅ 当前 | IWM Node 6 维度直接映射 Bowlby 内部工作模型。弹簧拉回动力学来自安全基地的"重复敏感性照料"逐渐建立理论 |
+| 2 | **Bretherton & Munholland** IWM 细化 | 2008 | `personality/graph.ts` — IWM 作为图节点 | ✅ 当前 | IWM 是层级化、多维度的表征结构——非单一"好/坏"评价，而是 6 个独立维度的动态平衡 |
+| 3 | **Heider** 平衡理论 | 1958 | `personality/graph.ts` — 图消息传递 | ✅ 当前 | P–O–X 三元平衡。admin 提到某人 → Heider 平衡传播 → 被提及者 IWM Node 更新。**仅 admin 通道触发**，guest 不做传播 |
+| 4 | **Jung** 人格面具 | 1943/1953 | `personality/persona.ts` — PersonaMask | ✅ 当前 | 同一自我在不同社交情境呈现不同面向。companion(小女儿) vs worker(大女儿) — 同一 Self-Node，不同表达偏置 |
+| 5 | **Mehrabian & Russell** PAD 情绪模型 | 1974 | `personality/ambient-context.ts` — 环境基线 | ✅ 当前 | 物理环境（光照、温度、空间）直接影响情绪三维度。AmbientContext 产生 ambientMood 6 维偏移，作为情绪基线 |
+| 6 | **Plutchik** 情绪轮 | 1980 | `personality/types.ts` — 情绪维度选择 | ✅ 当前 | intimacy/pride/calmness 三个额外维度的理论来源，与 PAD 的 pleasure/arousal/dominance 形成互补的 6 维空间 |
+| 7 | **OCC** 情绪认知评价 | 1988 | `personality/emotion.ts` — OCC 引擎 | ✅ 当前 | 情绪源于对事件的三维认知评价：目标相关性 × 期望一致性 × 因果归因 → EmotionDelta。**规则引擎，不经 LLM** |
+| 7+ | 🆕 **CPM** 组件过程模型 | 1993–2009 | `personality/emotion.ts` — 升级 | 📋 P5-C | 同一评价理论传统的演进。评价维度 3→5 (新增新颖性、应对能力)，加 appraisalSequence 多轮评价。OCC 保留为简化路径。详参见 [心理学模型现代化论证](./项目设计文档/心理学模型现代化论证.md) |
+| 8 | **LeDoux** 双通路情绪 | 1996 | `personality/emotion.ts` + `inner-voice.ts` | ✅ 当前 | 低通路(杏仁核, <20ms) = 规则引擎；高通路(皮层, 300-500ms) = 内心独白 LLM 调用。\|Δemotion\| > 0.15 → 触发高通路 |
+| 9 | **McEwen & Stellar** Allostatic Load | 1993 | `personality/emotion.ts` — 双弹簧拉回 | ✅ 当前 | 生物系统通过改变设定点适应长期压力。Self K=0.05 (极慢演化，性格硬件)；IWM K=adaptive (关系弹性) |
+| 10 | **Crick & Dodge** SIP 六步 | 1994 | `personality/planning.ts` — 社交规划 | ✅ 当前 | 编码→解释→澄清目标→生成策略→评估→执行。guest 4 预设目标，admin 0 义务(涌现) |
+| 11 | **Gross** 情绪调节策略 | 1998 | `personality/planning.ts` — 策略池 | ✅ 当前 | 5 策略：情境选择/修正/注意分配/认知重评/反应调节。SIP Step 4 策略生成池 + 通道差异 (guest 情绪钳制) |
+| 12 | **ToM** (Premack & Woodruff) 心理理论 | 1978 | `personality/signals.ts` — 信号提取 | ✅ 当前 | 推断他人心理状态。SIP Step 2 (解释线索) + IWM understanding 维度的认知基础。**确定性规则引擎** |
+| 12+ | 🆕 **Flavell 元认知 + Wellman 信念-欲望** | 1979–2014 | `personality/signals.ts` — 升级 | 📋 P5-C | 从单路径推断 → 多假设生成 + confidence tracking。Flavell: "思考自己的思考"。Wellman: BDI 框架。Premack 基础保留。详参见 [心理学模型现代化论证](./项目设计文档/心理学模型现代化论证.md) |
+| 13 | **SDT** 自我决定理论 | 2000 | `personality/configs/` — admin 通道设计 | ✅ 当前 | 自主性/胜任感/关联性三大基本心理需求。admin 通道 0 义务设计 → 自主性；IWM 关系维度 → 关联性 |
+| 14 | **Young** 图式疗法 | 2003 | `personality/types.ts` — Self-Node 定义 | ✅ 当前 | 早期形成的核心人格结构稳定且难以改变。Self-Node 作为"性格硬件"，K=0.05 极慢演化 |
+| 15 | **Klein** 内在客体 | 1946, 1957 | `personality/graph.ts` — IWM 表征本质 | ✅ 当前 | IWM Node 是 representation-not-reality。care/respect 维度的精神分析基础 |
+| 16 | **Winnicott** 促进性环境 | 1965 | `personality/graph.ts` — IWM 维度来源 | ✅ 当前 | 健康的心理发展需要"足够好的照料"。IWM safety/intimacy 维度的来源 |
+| 17 | **GraphSAGE** 图神经网络 | 2017 | `personality/graph.ts` — 消息传递 | ✅ 当前 | 归纳式图节点嵌入。社交图的 Message Passing 与节点更新的数学对应。与南志锦的 GNN 社交图谱链接预测项目形成学术对称 |
+
+> 📋 = 计划升级（P5-C 阶段实施）。当前架构运行在左侧模型上，升级后 OCC 和 Premack 作为简化路径保留。详见 [心理学模型现代化论证](./项目设计文档/心理学模型现代化论证.md)。
 
 ---
 
