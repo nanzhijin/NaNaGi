@@ -21,6 +21,7 @@ data/
 .DS_Store
 *.pem
 Thumbs.db
+LLM_INTERVIEW_BLIND_SPOTS.md
 
 # debug
 npm-debug.log*
