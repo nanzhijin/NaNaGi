@@ -13,6 +13,7 @@ node_modules/
 .next/
 out/
 dist/
+*.tsbuildinfo
 
 # 运行时记忆文件
 data/
