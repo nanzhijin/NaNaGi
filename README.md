@@ -45,6 +45,48 @@
 
 ---
 
+## 🍴 Fork 配置指南
+
+```bash
+# 1. 环境要求：Node.js ≥20
+node -v
+
+# 2. 安装依赖
+npm install
+
+# 3. 配置环境变量
+cp .env.example .env.local
+# 编辑 .env.local，填入下方必填项
+
+# 4. 启动
+npm run dev
+# → http://localhost:3000
+```
+
+### 环境变量说明
+
+| 变量 | 必需？ | 用途 | 不配会怎样 |
+|------|--------|------|-----------|
+| `NANAGI_PASSWORD_HASH` | **必填** | 登录密码 bcrypt | 无法登录 |
+| `DEEPSEEK_API_KEY` | **必填** | AI 对话 | 聊天功能不可用 |
+| `HUNYUAN_API_KEY` | 可选 | 混元 AI 生图 | 生图功能不可用 |
+| `WEATHER_API_KEY` | 可选 | 天气环境感知 | 天气功能不可用 |
+| `SMTP_*` | 可选 | 邮箱验证码 | 无法注册新账户 |
+
+生成密码 hash：
+```bash
+node -e "const bcrypt = require('bcryptjs'); console.log(bcrypt.hashSync('你的密码', 10));"
+```
+
+### Docker 一键启动
+
+```bash
+docker build -t nanagi .
+docker run -p 3000:3000 --env-file .env.local nanagi
+```
+
+---
+
 ## 目录
 
 1. [设计哲学](#1-设计哲学)

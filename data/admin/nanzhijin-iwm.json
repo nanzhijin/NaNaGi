@@ -1,0 +1,20 @@
+{
+  "personId": "nanzhijin",
+  "name": "南志锦",
+  "role": "admin",
+  "identity": "主人",
+  "traits": {
+    "safety": 0.5,
+    "intimacy": 0.1,
+    "care": 0.5,
+    "respect": 0.5,
+    "reliability": 0.5,
+    "understanding": 0.3
+  },
+  "knownFacts": [],
+  "topicInterests": [],
+  "firstMet": "2026-06-07T00:29:22.311Z",
+  "lastTalk": "2026-06-16T16:25:27.509Z",
+  "totalTurns": 10,
+  "historyDensity": 0.1
+}

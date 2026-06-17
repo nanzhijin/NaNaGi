@@ -1,0 +1,20 @@
+{
+  "personId": "guest-4gZd7stK9eQZ",
+  "name": "宋晚",
+  "role": "guest",
+  "identity": "普通用户",
+  "traits": {
+    "safety": 0.5,
+    "intimacy": 0.1,
+    "care": 0.5,
+    "respect": 0.5,
+    "reliability": 0.5,
+    "understanding": 0.3
+  },
+  "knownFacts": [],
+  "topicInterests": [],
+  "firstMet": "2026-06-07T03:43:25.581Z",
+  "lastTalk": "2026-06-07T09:38:33.771Z",
+  "totalTurns": 26,
+  "historyDensity": 0.26
+}

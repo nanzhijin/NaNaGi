@@ -1,5 +1,4 @@
-# secrets — 绝对不提交
-.env.local
+# secrets
 .env
 *.pem
 *.key
@@ -13,16 +12,10 @@ node_modules/
 .next/
 out/
 dist/
-*.tsbuildinfo
-
-# 运行时记忆文件
-data/
 
 # misc
 .DS_Store
-*.pem
 Thumbs.db
-LLM_INTERVIEW_BLIND_SPOTS.md
 
 # debug
 npm-debug.log*
@@ -34,3 +27,7 @@ yarn-error.log*
 
 # vercel
 .vercel
+
+# backup (contains real keys)
+.env.local.backup
+.history/
